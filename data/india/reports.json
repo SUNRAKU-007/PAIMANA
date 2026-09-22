@@ -1,0 +1,18 @@
+[
+  {
+    "project_id": 1,
+    "submitted_by": "officer1",
+    "timestamp": "2026-09-19T18:36:04.817956+00:00",
+    "expenditure_update_cr": 25.0,
+    "delay_reason": "Land clearance delay",
+    "notes": "Awaiting permits"
+  },
+  {
+    "project_id": 1,
+    "submitted_by": "admin",
+    "timestamp": "2026-09-19T18:36:04.838608+00:00",
+    "expenditure_update_cr": 30.0,
+    "delay_reason": null,
+    "notes": "Revised milestone"
+  }
+]

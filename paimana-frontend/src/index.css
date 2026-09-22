@@ -1,0 +1,25 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-ink:       #16213E;
+  --color-brand-ink-light: #2A3B5E;
+  --color-brand-amber:     #E8871E;
+  --color-brand-paper:     #FAF8F3;
+}
+
+
+body {
+  margin: 0;
+}
+
+/* ── Suppress native browser password-reveal button (Edge / Chrome on Windows)
+   so it doesn't double up next to our custom eye-icon toggle. ─────────────── */
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear {
+  display: none;
+}
+input[type="password"]::-webkit-credentials-auto-fill-button {
+  visibility: hidden;
+  pointer-events: none;
+  position: absolute;
+}

@@ -1,0 +1,34 @@
+{
+  "users": [
+    {
+      "username": "admin",
+      "hashed_password": "$2b$12$ElOyLrxbwmFjCmnytiZejOek.7H3m43yz4GcHzgEsmBk2GtuG/DoS",
+      "role": "admin",
+      "full_name": "System Admin"
+    },
+    {
+      "username": "officer1",
+      "hashed_password": "$2b$12$e4sd.sPIRrqNiH.tEhWp9eyvzOftTi1bHaxM221E6p8feQ1n3ys/C",
+      "role": "field_officer",
+      "full_name": "Field Officer"
+    },
+    {
+      "username": "demo_user",
+      "hashed_password": "$2b$12$iy7emmpT1Rzh.1Xr/Erkd.k2pNgQQHxjrZsyK3s6mlsm/lFGZ69Ni",
+      "role": "public",
+      "full_name": "Demo Citizen"
+    },
+    {
+      "username": "test_citizen",
+      "hashed_password": "$2b$12$nLcIkei7H5QCcR9oFL/Ia.25sha.JRJC829M7lYBY3eHMvnQD3i9W",
+      "role": "public",
+      "full_name": "Test Citizen"
+    },
+    {
+      "username": "sunraku_07",
+      "hashed_password": "$2b$12$4bIr1fY6PrdzUtatJ6iwKemS0i5ASm4fiGmmcpQIzJlJNk1brtyga",
+      "role": "public",
+      "full_name": "Sunraku"
+    }
+  ]
+}
