@@ -1,56 +1,6 @@
-# =========================
-# PAIMANA Git Ignore
-# =========================
-
-# Python
+﻿.env
 __pycache__/
-*.py[cod]
-*.pyo
-.venv/
-venv/
-env/
-
-# Environment variables / secrets
-.env
-.env.*
-!.env.example
-
-# Jupyter
-.ipynb_checkpoints/
-
-# Node / React
 node_modules/
+*.pyc
+.vite/
 dist/
-build/
-
-# IDE
-.vscode/
-.idea/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
-
-# Temporary files
-*.tmp
-*.temp
-
-# Model/cache artifacts
-*.pkl
-*.pickle
-
-# Local databases
-*.db
-*.sqlite
-*.sqlite3
-
-test_rl.pdf
-
-data/ConstructionData.csv
-
-index.html
-
-index.html
