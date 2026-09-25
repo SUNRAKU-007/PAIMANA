@@ -69,6 +69,50 @@ FEATURES = ["log_engineers_estimate", "bid_days", "item_count", "estimate_per_it
             "start_month", "is_monsoon_season", "materials_ppi", "ppi_deviation"]
 BID_ITEM_RE = re.compile(r"^\d+-\d+$")
 
+# HR_FEATURES: 13-feature list for the binary high-risk model.
+# Loaded at startup from models/hr_features.json (written by train_model.py).
+# Falls back to the hardcoded list if the file is missing.
+_HR_FEATURES_FALLBACK = FEATURES + [
+    "pct_earthwork", "pct_surfacing", "pct_structures",
+    "pct_drainage_traffic", "pct_other",
+]
+_hr_features_path = _resolve_file("models", "hr_features.json")
+try:
+    with open(_hr_features_path, "r") as _f:
+        HR_FEATURES = json.load(_f)
+    print(f"Loaded HR_FEATURES ({len(HR_FEATURES)} features) from {_hr_features_path}")
+except Exception as _e:
+    HR_FEATURES = _HR_FEATURES_FALLBACK
+    print(f"hr_features.json not found ({_e}); using fallback HR_FEATURES ({len(HR_FEATURES)})")
+
+_PCT_GROUPS = ["earthwork", "surfacing", "structures", "drainage_traffic", "other"]
+
+
+def _section_group(col_name: str) -> str:
+    """Map a Caltrans bid-item pay-code column to a section group by leading number."""
+    try:
+        leading = int(col_name.split("-")[0])
+    except (ValueError, IndexError):
+        return "other"
+    if 200 <= leading <= 299:
+        return "earthwork"
+    elif 300 <= leading <= 399:
+        return "surfacing"
+    elif 400 <= leading <= 499:
+        return "structures"
+    elif 500 <= leading <= 699:
+        return "drainage_traffic"
+    return "other"
+
+
+def _prob_to_tier(p: float) -> str:
+    """Bucket a high_risk probability into Low / Medium / High tier string."""
+    if p < 0.33:
+        return "Low"
+    elif p <= 0.66:
+        return "Medium"
+    return "High"
+
 # ── Global state populated at startup ──────────────────────────────────
 projects_df: pd.DataFrame = pd.DataFrame()
 cost_model = None
@@ -155,6 +199,21 @@ def load_data_and_models():
     # Drop rows with missing bid_days (same as training)
     df = df.dropna(subset=["bid_days"])
 
+    # --- Section-group pct_* features (required by binary high-risk model) ---
+    # Re-identify bid_item_cols after row drops so indices are consistent.
+    bid_item_cols = [c for c in df.columns if BID_ITEM_RE.match(c)]
+    col_to_group = {c: _section_group(c) for c in bid_item_cols}
+    group_col_map = {
+        g: [c for c, grp in col_to_group.items() if grp == g]
+        for g in _PCT_GROUPS
+    }
+    bid_matrix = df[bid_item_cols].fillna(0)
+    row_totals = bid_matrix.sum(axis=1)
+    for g in _PCT_GROUPS:
+        cols = group_col_map[g]
+        group_sum = bid_matrix[cols].sum(axis=1) if cols else pd.Series(0, index=df.index)
+        df[f"pct_{g}"] = np.where(row_totals > 0, group_sum / row_totals, 0.0)
+
     # Actual cost overrun
     df["actual_cost_overrun_pct"] = (
         (df["bid_total"] - df["engineers_estimate"]) / df["engineers_estimate"] * 100
@@ -174,7 +233,12 @@ def load_data_and_models():
     # --- Predictions ---
     X = df[FEATURES]
     df["predicted_overrun_pct"] = cost_model.predict(X)
-    df["predicted_risk_tier"] = risk_model.predict(X)
+
+    # Binary high-risk model: use predict_proba then bucket into Low/Medium/High
+    X_hr = df[HR_FEATURES]
+    hr_proba = risk_model.predict_proba(X_hr)[:, 1]
+    df["high_risk_prob"] = hr_proba
+    df["predicted_risk_tier"] = [_prob_to_tier(p) for p in hr_proba]
 
     # --- Assign project_id from index ---
     df = df.reset_index(drop=True)
@@ -199,10 +263,13 @@ def load_data_and_models():
     keep_cols = [
         "project_id", "engineers_estimate", "bid_total", "bid_days",
         "item_count", "actual_cost_overrun_pct", "predicted_overrun_pct",
-        "predicted_risk_tier",
-        # feature values for detail endpoint
+        "predicted_risk_tier", "high_risk_prob",
+        # original feature values for detail endpoint
         "log_engineers_estimate", "estimate_per_item",
         "start_month", "is_monsoon_season", "materials_ppi", "ppi_deviation",
+        # section-group pct_* features
+        "pct_earthwork", "pct_surfacing", "pct_structures",
+        "pct_drainage_traffic", "pct_other",
     ]
     projects_df = df[keep_cols].copy()
 
@@ -910,7 +977,6 @@ def get_india_notifications(
 @app.post("/india/assistant/ask")
 def india_assistant_ask(
     request: AskRequest,
-    current_user: dict = Depends(get_current_user),
 ):
     """Answer user questions about real Indian infrastructure projects using Gemini."""
     if not gemini_client:

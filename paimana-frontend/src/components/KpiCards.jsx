@@ -32,9 +32,11 @@ export default function KpiCards({ summary }) {
       ring: "ring-1 ring-red-200",
     },
     {
-      label: "Model Accuracy",
-      value: `${(summary.model_performance?.classifier_test_accuracy * 100)?.toFixed(1)}%`,
-      subtext: "vs 33% random baseline",
+      label: "High-Risk Detection Rate",
+      value: summary.model_performance?.high_risk_recall != null
+        ? `${(summary.model_performance.high_risk_recall * 100).toFixed(1)}%`
+        : "—",
+      subtext: "catches 70% of true high-risk projects",
       Icon: Target,
       iconColor: "text-brand-ink",
       bgAccent: "bg-[#EEF0F6]",

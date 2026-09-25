@@ -46,6 +46,9 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 
+VALID_ROLES = {"admin", "field_officer", "public", "contractor"}
+
+
 # ── User Store Helper ──────────────────────────────────────────────────
 def _get_users_file_path() -> str:
     candidates = [
@@ -70,22 +73,28 @@ def init_user_store():
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
         demo_users = [
             {
+                "id": "admin",
                 "username": "admin",
                 "hashed_password": pwd_context.hash("admin123"),
                 "role": "admin",
                 "full_name": "System Admin",
+                "is_verified": True,
             },
             {
+                "id": "officer1",
                 "username": "officer1",
                 "hashed_password": pwd_context.hash("officer123"),
                 "role": "field_officer",
                 "full_name": "Field Officer",
+                "is_verified": True,
             },
             {
+                "id": "demo_user",
                 "username": "demo_user",
                 "hashed_password": pwd_context.hash("demo123"),
                 "role": "public",
                 "full_name": "Demo Citizen",
+                "is_verified": True,
             },
         ]
         with open(file_path, "w", encoding="utf-8") as f:
@@ -94,13 +103,20 @@ def init_user_store():
 
 
 def load_users() -> list:
-    """Read users list from JSON store."""
+    """Read users list from JSON store, ensuring is_verified is populated."""
     init_user_store()
     file_path = _get_users_file_path()
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-            return data.get("users", [])
+            users = data.get("users", [])
+            for u in users:
+                if "is_verified" not in u:
+                    # Existing users (admin, officer1, demo_user, etc.) are treated as verified
+                    u["is_verified"] = False if u.get("role") == "contractor" else True
+                if "id" not in u:
+                    u["id"] = u.get("username")
+            return users
     except Exception as e:
         print(f"Error reading users from {file_path}: {e}")
         return []
@@ -135,6 +151,10 @@ def get_user(username: str) -> Optional[dict]:
     users = load_users()
     for user in users:
         if user.get("username") == username:
+            if "is_verified" not in user:
+                user["is_verified"] = False if user.get("role") == "contractor" else True
+            if "id" not in user:
+                user["id"] = user.get("username")
             return user
     return None
 
@@ -182,10 +202,29 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
     return user
 
 
+def require_verified_user(current_user: dict = Depends(get_current_user)) -> dict:
+    """FastAPI dependency that blocks unverified contractors from accessing gated resources."""
+    user_role = current_user.get("role")
+    is_verified = current_user.get("is_verified", True if user_role != "contractor" else False)
+    if user_role == "contractor" and not is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your contractor account is pending admin approval",
+        )
+    return current_user
+
+
 def require_role(*allowed_roles: str):
-    """Dependency factory that wraps get_current_user and raises 403 if role not in allowed_roles."""
+    """Dependency factory that wraps get_current_user and raises 403 if role not in allowed_roles,
+    or if an unverified contractor attempts access."""
     def role_checker(current_user: dict = Depends(get_current_user)) -> dict:
         user_role = current_user.get("role")
+        is_verified = current_user.get("is_verified", True if user_role != "contractor" else False)
+        if user_role == "contractor" and not is_verified:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your contractor account is pending admin approval",
+            )
         if user_role not in allowed_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -193,3 +232,4 @@ def require_role(*allowed_roles: str):
             )
         return current_user
     return role_checker
+

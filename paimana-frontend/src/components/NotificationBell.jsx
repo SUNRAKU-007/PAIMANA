@@ -113,7 +113,7 @@ export default function NotificationBell({ authFetch, userRole, onProjectClick }
 
       {/* Dropdown Panel */}
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-96 bg-white rounded-xl shadow-2xl border border-slate-100 max-h-96 overflow-y-auto z-50 divide-y divide-slate-100">
+        <div className="fixed sm:absolute top-14 sm:top-full left-3 right-3 sm:left-auto sm:right-0 mt-2 sm:w-96 max-w-[calc(100vw-1.5rem)] bg-white rounded-xl shadow-2xl border border-slate-100 max-h-96 overflow-y-auto overflow-x-hidden z-50 divide-y divide-slate-100">
           {/* Header */}
           <div className="p-3.5 bg-white/95 backdrop-blur-xs sticky top-0 z-10 flex items-center justify-between border-b border-slate-100">
             <h3 className="font-semibold text-sm text-slate-800">
@@ -193,7 +193,7 @@ export default function NotificationBell({ authFetch, userRole, onProjectClick }
                         {/* Sector / State Tag */}
                         {tag && (
                           <div className="mt-1.5 flex items-center gap-1.5">
-                            <span className="text-[10px] text-slate-400 font-medium bg-slate-100 px-1.5 py-0.5 rounded truncate max-w-[280px]">
+                            <span className="text-[10px] text-slate-400 font-medium bg-slate-100 px-1.5 py-0.5 rounded truncate max-w-[200px] sm:max-w-[280px]">
                               {tag}
                             </span>
                           </div>

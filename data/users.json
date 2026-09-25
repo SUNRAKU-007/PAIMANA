@@ -17,6 +17,16 @@
       "hashed_password": "$2b$12$iy7emmpT1Rzh.1Xr/Erkd.k2pNgQQHxjrZsyK3s6mlsm/lFGZ69Ni",
       "role": "public",
       "full_name": "Demo Citizen"
+    },
+    {
+      "id": "officer2",
+      "user_id": "officer2",
+      "username": "officer2",
+      "hashed_password": "$2b$12$e4sd.sPIRrqNiH.tEhWp9eyvzOftTi1bHaxM221E6p8feQ1n3ys/C",
+      "role": "field_officer",
+      "full_name": "Field Officer 2",
+      "is_verified": true,
+      "assigned_project_id": null
     }
   ]
 }

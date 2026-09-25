@@ -17,7 +17,7 @@ from sklearn.ensemble import (
 )
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.model_selection import train_test_split, cross_val_score
-from sklearn.metrics import r2_score, accuracy_score
+from sklearn.metrics import r2_score, accuracy_score, classification_report, confusion_matrix
 import joblib
 
 # ── 1. Load data ────────────────────────────────────────────────────────
@@ -268,3 +268,183 @@ clf_candidates = [
 best_clf, best_clf_name, best_clf_cv = max(clf_candidates, key=lambda x: x[2])
 joblib.dump(best_clf, os.path.join("models", "risk_model.joblib"))
 print(f"Saved {best_clf_name} as risk_model.joblib (best CV Acc: {best_clf_cv:.4f})")
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ── 10. BINARY HIGH-RISK CLASSIFIER (additional – not saved to disk) ──────
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ── 10a. Project-type proxy: section-group percentage features ────────────
+def _section_group(col_name: str) -> str:
+    """Map a bid-item pay-code column name to a Caltrans section group.
+
+    Groups are determined by the leading number before the first hyphen:
+      200-299  -> earthwork
+      300-399  -> surfacing
+      400-499  -> structures
+      500-699  -> drainage_traffic
+      anything else -> other
+    """
+    try:
+        leading = int(col_name.split("-")[0])
+    except (ValueError, IndexError):
+        return "other"
+    if 200 <= leading <= 299:
+        return "earthwork"
+    elif 300 <= leading <= 399:
+        return "surfacing"
+    elif 400 <= leading <= 499:
+        return "structures"
+    elif 500 <= leading <= 699:
+        return "drainage_traffic"
+    else:
+        return "other"
+
+
+# Build a mapping: column -> group, then group -> list of columns
+col_to_group = {c: _section_group(c) for c in bid_item_cols}
+groups = ["earthwork", "surfacing", "structures", "drainage_traffic", "other"]
+group_cols = {g: [c for c, grp in col_to_group.items() if grp == g] for g in groups}
+
+print("\n" + "=" * 70)
+print("SECTION-GROUP COLUMN COUNTS (bid-item -> group mapping)")
+print("=" * 70)
+for g in groups:
+    print(f"  {g:20s}: {len(group_cols[g])} columns")
+
+# For each project, sum bid-item values per group, then divide by row total
+# Re-slice from cleaned df so row indices match after dropna filtering above
+bid_matrix = df[bid_item_cols].fillna(0)
+row_totals = bid_matrix.sum(axis=1)       # project-level total bid-item amount
+
+for g in groups:
+    cols = group_cols[g]
+    group_sum = bid_matrix[cols].sum(axis=1) if cols else pd.Series(0, index=df.index)
+    # Guard against division-by-zero: projects with no bid-item amounts get 0
+    df[f"pct_{g}"] = np.where(row_totals > 0, group_sum / row_totals, 0.0)
+
+PCT_FEATURES = [f"pct_{g}" for g in groups]
+print(f"\nAdded pct_* features: {PCT_FEATURES}")
+print(df[PCT_FEATURES].describe().round(4).to_string())
+
+# ── 10b. Binary high-risk target (75th-percentile threshold) ─────────────
+threshold_75 = df["cost_overrun_pct"].quantile(0.75)
+df["high_risk"] = (df["cost_overrun_pct"] > threshold_75).astype(int)
+
+n_total = len(df)
+n_high = df["high_risk"].sum()
+n_low = n_total - n_high
+
+print("\n" + "=" * 70)
+print("BINARY HIGH-RISK TARGET")
+print("=" * 70)
+print(f"  75th-percentile threshold: {threshold_75:.4f}%")
+print(f"  High-risk (=1):  {n_high:>6d}  ({100 * n_high / n_total:.1f}%)")
+print(f"  Not high-risk (=0): {n_low:>6d}  ({100 * n_low / n_total:.1f}%)")
+
+# ── 10c. Combined feature set & train/test split ──────────────────────────
+HR_FEATURES = FEATURES + PCT_FEATURES     # 8 original + 5 pct_* = 13 total
+
+X_hr = df[HR_FEATURES]
+y_hr = df["high_risk"]
+
+X_hr_train, X_hr_test, y_hr_train, y_hr_test = train_test_split(
+    X_hr, y_hr, test_size=0.2, random_state=42, stratify=y_hr
+)
+
+print(f"\n  Train size: {len(X_hr_train)}  |  Test size: {len(X_hr_test)}")
+print(f"  HR_FEATURES ({len(HR_FEATURES)}): {HR_FEATURES}")
+
+# ── 10d. Train binary RandomForestClassifier ──────────────────────────────
+hr_clf = RandomForestClassifier(
+    n_estimators=100, max_depth=8, min_samples_leaf=5,
+    class_weight="balanced", random_state=42, n_jobs=-1
+)
+hr_clf.fit(X_hr_train, y_hr_train)
+
+# ── 10e. Evaluate ─────────────────────────────────────────────────────────
+y_hr_pred = hr_clf.predict(X_hr_test)
+
+overall_acc = accuracy_score(y_hr_test, y_hr_pred)
+majority_class = y_hr_test.value_counts().idxmax()
+majority_acc = (y_hr_test == majority_class).mean()
+
+print("\n" + "=" * 70)
+print("BINARY HIGH-RISK CLASSIFIER -- EVALUATION RESULTS")
+print("=" * 70)
+print(f"  Overall Accuracy:              {overall_acc:.4f}  ({overall_acc * 100:.2f}%)")
+print(f"  Majority-Class Baseline Acc:   {majority_acc:.4f}  ({majority_acc * 100:.2f}%)"  \
+      f"  <- always predicting class {majority_class}")
+delta = overall_acc - majority_acc
+print(f"  Improvement over baseline:     {delta:+.4f}  ({delta * 100:+.2f} pp)")
+
+print("\n--- Classification Report ---")
+print(classification_report(y_hr_test, y_hr_pred, target_names=["Not High-Risk", "High-Risk"]))
+
+print("--- Confusion Matrix ---")
+cm = confusion_matrix(y_hr_test, y_hr_pred)
+print(f"  {'':20s}  Predicted 0   Predicted 1")
+print(f"  {'Actual 0 (not high)':20s}  {cm[0, 0]:>11d}   {cm[0, 1]:>11d}")
+print(f"  {'Actual 1 (high)':20s}  {cm[1, 0]:>11d}   {cm[1, 1]:>11d}")
+
+print("\n--- Feature Importances (Binary HR Classifier) ---")
+for feat, imp in sorted(zip(HR_FEATURES, hr_clf.feature_importances_),
+                         key=lambda x: x[1], reverse=True):
+    print(f"  {feat:30s} {imp:.4f}")
+
+# ── 10f. Probability-based tier bucketing ─────────────────────────────────
+# Use the probability of the high_risk class (column index 1)
+hr_proba = hr_clf.predict_proba(X_hr_test)[:, 1]
+
+def _prob_to_tier(p: float) -> str:
+    if p < 0.33:
+        return "Low"
+    elif p <= 0.66:
+        return "Medium"
+    else:
+        return "High"
+
+# Build a results frame aligned to the test set
+test_results = X_hr_test.copy()
+test_results["high_risk_prob"]    = hr_proba
+test_results["risk_tier_prob"]    = [_prob_to_tier(p) for p in hr_proba]
+test_results["actual_overrun_pct"] = df.loc[X_hr_test.index, "cost_overrun_pct"].values
+
+print("\n" + "=" * 70)
+print("PROBABILITY-BASED RISK TIERS (test set)")
+print("=" * 70)
+
+tier_order = ["Low", "Medium", "High"]
+print(f"\n  {'Tier':<10}  {'Count':>6}  {'% of test':>10}  {'Avg actual overrun %':>22}")
+print(f"  {'-'*10}  {'-'*6}  {'-'*10}  {'-'*22}")
+for tier in tier_order:
+    mask = test_results["risk_tier_prob"] == tier
+    n    = mask.sum()
+    pct  = 100 * n / len(test_results)
+    avg_overrun = test_results.loc[mask, "actual_overrun_pct"].mean() if n > 0 else float("nan")
+    print(f"  {tier:<10}  {n:>6}  {pct:>9.1f}%  {avg_overrun:>21.2f}%")
+
+print()
+print("  Sanity check: avg overrun should increase Low -> Medium -> High")
+
+# ── 10g. Save model and feature list ──────────────────────────────────────
+import json
+
+model_path    = os.path.join("models", "risk_model.joblib")
+features_path = os.path.join("models", "hr_features.json")
+
+joblib.dump(hr_clf, model_path)
+
+with open(features_path, "w") as f:
+    json.dump(HR_FEATURES, f, indent=2)
+
+print("\n" + "=" * 70)
+print("SAVED")
+print("=" * 70)
+print(f"  Model   -> {model_path}")
+print(f"    type         : RandomForestClassifier (class_weight='balanced')")
+print(f"    n_estimators : 100  max_depth: 8  min_samples_leaf: 5")
+print(f"    trained on   : {len(X_hr_train)} rows  |  tested on: {len(X_hr_test)} rows")
+print(f"  Features-> {features_path}")
+print(f"    {len(HR_FEATURES)} features: {HR_FEATURES}")
+print()
+print("  NOTE: main.py not yet updated -- update HR_FEATURES there before serving.")

@@ -70,5 +70,138 @@
     "expenditure_update_cr": 120.0,
     "delay_reason": "monsoon disruption",
     "notes": "ksdnwk"
+  },
+  {
+    "project_id": "705728",
+    "submitted_by": "officer1",
+    "timestamp": "2026-09-23T13:35:21.181016+00:00",
+    "expenditure_update_cr": 91000.5,
+    "delay_reason": "Monsoon slowdown",
+    "notes": "Weekly report by assigned officer"
+  },
+  {
+    "project_id": "705728",
+    "submitted_by": "officer1",
+    "timestamp": "2026-09-23T13:39:38.687770+00:00",
+    "expenditure_update_cr": 91000.5,
+    "delay_reason": "Monsoon slowdown",
+    "notes": "Weekly report by assigned officer"
+  },
+  {
+    "project_id": "705728",
+    "submitted_by": "officer1",
+    "timestamp": "2026-09-23T15:28:16.496188+00:00",
+    "expenditure_update_cr": 100.0,
+    "delay_reason": null,
+    "notes": "Officer update"
+  },
+  {
+    "project_id": "705728",
+    "submitted_by": "officer1",
+    "timestamp": "2026-09-23T15:33:46.029899+00:00",
+    "expenditure_update_cr": 12.0,
+    "delay_reason": "contractor issue",
+    "notes": "//"
+  },
+  {
+    "project_id": "705728",
+    "submitted_by": "officer1",
+    "timestamp": "2026-09-23T15:37:37.307675+00:00",
+    "expenditure_update_cr": 140.2,
+    "delay_reason": "Monsoon rain pause",
+    "notes": "Field progress normal"
+  },
+  {
+    "project_id": "705728",
+    "submitted_by": "officer1",
+    "timestamp": "2026-09-24T04:07:16.628916+00:00",
+    "expenditure_update_cr": 250.0,
+    "delay_reason": "material shortage",
+    "notes": "test report"
+  },
+  {
+    "id": "b96e1b29",
+    "report_id": "b96e1b29",
+    "project_id": "705728",
+    "submitted_by": "officer1",
+    "timestamp": "2026-09-24T04:44:54.061091+00:00",
+    "expenditure_update_cr": 999999.0,
+    "progress_pct": 10.0,
+    "delay_reason": "Excessive delay claim",
+    "notes": "Testing rejection flow",
+    "status": "rejected",
+    "rejection_reason": "Disputed billing figures",
+    "rejected_at": "2026-09-24T04:44:54.096703+00:00",
+    "rejected_by": "contractor1"
+  },
+  {
+    "id": "f0f2a771",
+    "report_id": "f0f2a771",
+    "project_id": "705728",
+    "submitted_by": "officer1",
+    "timestamp": "2026-09-24T04:44:54.133071+00:00",
+    "expenditure_update_cr": 91234.0,
+    "progress_pct": 19.5,
+    "delay_reason": "Supply chain adjustment",
+    "notes": "Valid monthly statement",
+    "status": "confirmed",
+    "confirmed_at": "2026-09-24T04:44:54.166179+00:00",
+    "confirmed_by": "contractor1"
+  },
+  {
+    "id": "e0d83797",
+    "report_id": "e0d83797",
+    "project_id": "900000",
+    "submitted_by": "officer1",
+    "timestamp": "2026-09-24T05:09:24.776766+00:00",
+    "expenditure_update_cr": 35.0,
+    "progress_pct": 12.0,
+    "delay_reason": null,
+    "notes": "",
+    "status": "confirmed",
+    "confirmed_at": "2026-09-24T05:11:14.842347+00:00",
+    "confirmed_by": "contractor1"
+  },
+  {
+    "id": "19de6a52",
+    "report_id": "19de6a52",
+    "project_id": "900001",
+    "submitted_by": "officer2",
+    "timestamp": "2026-09-24T14:09:50.666086+00:00",
+    "expenditure_update_cr": 15.0,
+    "progress_pct": 10.0,
+    "delay_reason": null,
+    "notes": "",
+    "status": "confirmed",
+    "confirmed_at": "2026-09-24T14:10:48.614838+00:00",
+    "confirmed_by": "contractor3"
+  },
+  {
+    "id": "8d160c05",
+    "report_id": "8d160c05",
+    "project_id": "900000",
+    "submitted_by": "officer1",
+    "timestamp": "2026-09-25T04:11:48.918754+00:00",
+    "expenditure_update_cr": 36.0,
+    "progress_pct": 14.0,
+    "delay_reason": null,
+    "notes": "Officer weekly progress update",
+    "status": "confirmed",
+    "confirmed_at": "2026-09-25T04:11:48.989685+00:00",
+    "confirmed_by": "contractor1"
+  },
+  {
+    "id": "0434a4f5",
+    "report_id": "0434a4f5",
+    "project_id": "900000",
+    "submitted_by": "officer1",
+    "timestamp": "2026-09-25T04:13:12.824076+00:00",
+    "expenditure_update_cr": 36.0,
+    "progress_pct": 14.0,
+    "delay_reason": null,
+    "notes": "Officer weekly progress update",
+    "status": "confirmed",
+    "confirmed_at": "2026-09-25T04:13:12.883983+00:00",
+    "confirmed_by": "contractor1"
   }
 ]

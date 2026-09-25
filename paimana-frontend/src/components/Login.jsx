@@ -30,7 +30,7 @@ function EyeOff() {
 function PasswordField({ id, value, onChange, autoComplete, placeholder }) {
   const [show, setShow] = useState(false);
   return (
-    <div style={{ position: 'relative' }}>
+    <div style={{ position: 'relative', width: '100%' }}>
       <input
         id={id}
         type={show ? 'text' : 'password'}
@@ -39,10 +39,16 @@ function PasswordField({ id, value, onChange, autoComplete, placeholder }) {
         value={value}
         onChange={onChange}
         placeholder={placeholder}
-        className="w-full px-4 py-3 pr-11 rounded-md border border-slate-300 bg-white text-slate-900 text-sm
+        className="w-full pl-4 pr-12 py-3 rounded-md border border-slate-300 bg-white text-slate-900 text-sm
                    placeholder:text-slate-400 outline-none transition-colors
                    focus:outline-none focus:border-[#E8871E] focus:ring-1 focus:ring-[#E8871E]"
-        style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}
+        style={{
+          fontFamily: show
+            ? "'IBM Plex Sans', sans-serif"
+            : 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+          letterSpacing: show ? 'normal' : '0.12em',
+          lineHeight: '1.4',
+        }}
       />
       <button
         type="button"
@@ -55,11 +61,12 @@ function PasswordField({ id, value, onChange, autoComplete, placeholder }) {
           transform: 'translateY(-50%)',
           background: 'none',
           border: 'none',
-          padding: 0,
+          padding: '4px',
           cursor: 'pointer',
           color: '#94a3b8',
           display: 'flex',
           alignItems: 'center',
+          justifyContent: 'center',
         }}
         aria-label={show ? 'Hide password' : 'Show password'}
       >
@@ -69,7 +76,7 @@ function PasswordField({ id, value, onChange, autoComplete, placeholder }) {
   );
 }
 
-export default function Login({ onLoginSuccess }) {
+export default function Login({ onLoginSuccess, onCancel }) {
   const [mode, setMode] = useState('login'); // 'login' | 'register'
 
   // ── Login fields ─────────────────────────────────────────────────────────
@@ -92,8 +99,8 @@ export default function Login({ onLoginSuccess }) {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       });
 
-      const { access_token, role, full_name } = response.data;
-      if (onLoginSuccess) onLoginSuccess(access_token, role, full_name);
+      const { access_token, role, full_name, is_verified, assigned_project_id } = response.data;
+      if (onLoginSuccess) onLoginSuccess(access_token, role, full_name, is_verified, assigned_project_id);
     } catch (err) {
       if (err.response && err.response.status === 401) {
         setError('Invalid username or password.');
@@ -109,6 +116,8 @@ export default function Login({ onLoginSuccess }) {
   const [regUsername, setRegUsername] = useState('');
   const [regPassword, setRegPassword] = useState('');
   const [regFullName, setRegFullName] = useState('');
+  const [regRole, setRegRole] = useState('public'); // 'public' | 'contractor'
+  const [regPendingNotice, setRegPendingNotice] = useState(false);
 
   async function handleRegister(e) {
     e.preventDefault();
@@ -121,19 +130,25 @@ export default function Login({ onLoginSuccess }) {
         username: regUsername.trim(),
         password: regPassword,
         full_name: regFullName.trim(),
+        role: regRole,
       });
 
-      // 2. Auto-login with the same credentials
-      const params = new URLSearchParams();
-      params.append('username', regUsername.trim());
-      params.append('password', regPassword);
+      if (regRole === 'contractor') {
+        // Show pending notice for contractor
+        setRegPendingNotice(true);
+      } else {
+        // 2. Auto-login for public users
+        const params = new URLSearchParams();
+        params.append('username', regUsername.trim());
+        params.append('password', regPassword);
 
-      const loginRes = await axios.post(`${API}/auth/login`, params, {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      });
+        const loginRes = await axios.post(`${API}/auth/login`, params, {
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        });
 
-      const { access_token, role, full_name } = loginRes.data;
-      if (onLoginSuccess) onLoginSuccess(access_token, role, full_name);
+        const { access_token, role, full_name, is_verified, assigned_project_id } = loginRes.data;
+        if (onLoginSuccess) onLoginSuccess(access_token, role, full_name, is_verified, assigned_project_id);
+      }
     } catch (err) {
       setError(
         err.response?.data?.detail ||
@@ -147,6 +162,7 @@ export default function Login({ onLoginSuccess }) {
   // ── Mode switch (clears errors + resets shared error) ────────────────────
   function switchMode(next) {
     setError('');
+    setRegPendingNotice(false);
     setMode(next);
   }
 
@@ -189,95 +205,167 @@ export default function Login({ onLoginSuccess }) {
         </svg>
 
         {/* Content Container */}
-        <div className="relative z-10">
-          {/* Amber horizontal accent mark */}
-          <div
-            className="mb-8 md:mb-12 rounded-full"
-            style={{ width: '48px', height: '3px', backgroundColor: '#E8871E' }}
-            aria-hidden="true"
-          />
+        <div className="relative z-10 flex flex-col justify-between h-full">
+          <div>
+            {/* MoSPI Status Eyebrow */}
+            <div className="flex items-center gap-2 mb-4">
+              <span className="w-2 h-2 rounded-full bg-[#E8871E] animate-pulse" />
+              <span
+                className="text-xs uppercase tracking-widest text-[#E8871E] font-medium"
+                style={{ fontFamily: "'IBM Plex Mono', monospace" }}
+              >
+                MoSPI Infrastructure Monitoring System
+              </span>
+            </div>
 
-          {/* Headline and Subhead */}
-          <h1
-            className="font-bold text-white tracking-tight leading-none"
-            style={{
-              fontFamily: "'Fraunces', serif",
-              fontSize: 'clamp(2.5rem, 5vw, 4rem)',
-            }}
-          >
-            PAIMANA
-          </h1>
-          <p
-            className="text-slate-200 mt-2 font-normal text-lg sm:text-xl md:text-2xl"
-            style={{ fontFamily: "'Fraunces', serif" }}
-          >
-            Infrastructure Intelligence Platform
-          </p>
+            {/* Amber horizontal accent mark */}
+            <div
+              className="mb-6 rounded-full"
+              style={{ width: '48px', height: '3px', backgroundColor: '#E8871E' }}
+              aria-hidden="true"
+            />
 
-          {/* Supporting line */}
-          <p
-            className="mt-6 text-slate-300 text-sm sm:text-base leading-relaxed max-w-[40ch]"
-            style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}
-          >
-            Real project data. Real risk signals. Built for the people monitoring India&apos;s infrastructure.
-          </p>
-        </div>
-
-        {/* Three small stat callouts */}
-        <div className="relative z-10 mt-10 md:mt-auto pt-8 border-t border-slate-700/40 flex flex-col sm:flex-row md:flex-col lg:flex-row gap-4 sm:gap-6 md:gap-3 lg:gap-6">
-          <div className="flex items-baseline space-x-2">
-            <span
-              className="font-medium text-base"
-              style={{ color: '#E8871E', fontFamily: "'IBM Plex Mono', monospace" }}
+            {/* Headline and Subhead */}
+            <h1
+              className="font-bold text-white tracking-tight leading-none"
+              style={{
+                fontFamily: "'Fraunces', serif",
+                fontSize: 'clamp(2.5rem, 4.5vw, 3.75rem)',
+              }}
             >
-              1,451
-            </span>
-            <span
-              className="text-slate-300 text-sm"
+              PAIMANA
+            </h1>
+            <p
+              className="text-slate-200 mt-2 font-normal text-lg sm:text-xl md:text-2xl"
+              style={{ fontFamily: "'Fraunces', serif" }}
+            >
+              Infrastructure Intelligence Platform
+            </p>
+
+            {/* Supporting line */}
+            <p
+              className="mt-4 text-slate-300 text-sm sm:text-base leading-relaxed max-w-[44ch]"
               style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}
             >
-              projects tracked
-            </span>
+              Real project data. Real risk signals. Built for the people monitoring India&apos;s infrastructure.
+            </p>
+
+            {/* Three supporting capability cards bridging the layout */}
+            <div className="my-8 lg:my-10 space-y-3.5 max-w-xl">
+              <div className="flex items-start gap-3.5 p-3.5 rounded-lg bg-white/[0.03] border border-white/[0.07] backdrop-blur-sm">
+                <div className="w-8 h-8 rounded-md bg-[#E8871E]/15 text-[#E8871E] flex items-center justify-center shrink-0 mt-0.5">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+                  </svg>
+                </div>
+                <div>
+                  <div className="text-sm font-semibold text-white tracking-wide">Predictive Cost-Overrun Intelligence</div>
+                  <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">
+                    Machine learning risk scoring trained on bidding dynamics, duration targets, and raw material inflation.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3.5 p-3.5 rounded-lg bg-white/[0.03] border border-white/[0.07] backdrop-blur-sm">
+                <div className="w-8 h-8 rounded-md bg-[#E8871E]/15 text-[#E8871E] flex items-center justify-center shrink-0 mt-0.5">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
+                    <path d="m9 12 2 2 4-4" />
+                  </svg>
+                </div>
+                <div>
+                  <div className="text-sm font-semibold text-white tracking-wide">Field Verification & Accountability</div>
+                  <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">
+                    Role-governed weekly progress reporting with dual-key confirmation between officers and contractors.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-start gap-3.5 p-3.5 rounded-lg bg-white/[0.03] border border-white/[0.07] backdrop-blur-sm">
+                <div className="w-8 h-8 rounded-md bg-[#E8871E]/15 text-[#E8871E] flex items-center justify-center shrink-0 mt-0.5">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect width="18" height="18" x="3" y="3" rx="2" />
+                    <path d="M3 9h18" /><path d="M9 21V9" />
+                  </svg>
+                </div>
+                <div>
+                  <div className="text-sm font-semibold text-white tracking-wide">Live MoSPI Portfolio Telemetry</div>
+                  <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">
+                    Comprehensive tracking across central railway lines, national expressways, and urban transit networks.
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <div className="flex items-baseline space-x-2">
-            <span
-              className="font-medium text-base"
-              style={{ color: '#E8871E', fontFamily: "'IBM Plex Mono', monospace" }}
-            >
-              685
-            </span>
-            <span
-              className="text-slate-300 text-sm"
-              style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}
-            >
-              flagged for review
-            </span>
-          </div>
+          {/* Four stat callouts */}
+          <div className="pt-6 border-t border-slate-700/50 grid grid-cols-2 sm:grid-cols-4 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="flex flex-col">
+              <span
+                className="font-semibold text-base sm:text-lg"
+                style={{ color: '#E8871E', fontFamily: "'IBM Plex Mono', monospace" }}
+              >
+                1,451
+              </span>
+              <span className="text-slate-300 text-xs mt-0.5" style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}>
+                projects tracked
+              </span>
+            </div>
 
-          <div className="flex items-baseline space-x-2">
-            <span
-              className="font-medium text-base"
-              style={{ color: '#E8871E', fontFamily: "'IBM Plex Mono', monospace" }}
-            >
-              3
-            </span>
-            <span
-              className="text-slate-300 text-sm"
-              style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}
-            >
-              roles, one platform
-            </span>
+            <div className="flex flex-col">
+              <span
+                className="font-semibold text-base sm:text-lg"
+                style={{ color: '#E8871E', fontFamily: "'IBM Plex Mono', monospace" }}
+              >
+                685
+              </span>
+              <span className="text-slate-300 text-xs mt-0.5" style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}>
+                flagged for review
+              </span>
+            </div>
+
+            <div className="flex flex-col">
+              <span
+                className="font-semibold text-base sm:text-lg"
+                style={{ color: '#E8871E', fontFamily: "'IBM Plex Mono', monospace" }}
+              >
+                70.0%
+              </span>
+              <span className="text-slate-300 text-xs mt-0.5" style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}>
+                high-risk recall
+              </span>
+            </div>
+
+            <div className="flex flex-col">
+              <span
+                className="font-semibold text-base sm:text-lg"
+                style={{ color: '#E8871E', fontFamily: "'IBM Plex Mono', monospace" }}
+              >
+                3
+              </span>
+              <span className="text-slate-300 text-xs mt-0.5" style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}>
+                governed roles
+              </span>
+            </div>
           </div>
         </div>
       </div>
 
       {/* RIGHT PANEL (40% width, the actual form, on off-white #FAF8F3 background) */}
       <div
-        className="w-full md:w-[40%] flex items-center justify-center p-6 sm:p-10 md:p-12"
+        className="w-full md:w-[40%] flex flex-col justify-between items-center p-6 sm:p-10 md:p-12 min-h-screen"
         style={{ backgroundColor: '#FAF8F3' }}
       >
-        <div className="w-full max-w-sm">
+        {/* Subtle top header for visual framing on desktop */}
+        <div className="w-full max-w-sm pt-2 hidden md:flex items-center justify-between text-xs text-slate-400 font-medium">
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace" }}>PAIMANA SECURE ACCESS</span>
+          <span className="inline-flex items-center gap-1.5 text-slate-500 font-normal">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+            v2.4 Active
+          </span>
+        </div>
+
+        <div className="w-full max-w-sm my-auto py-6">
 
           {/* ── LOGIN MODE ─────────────────────────────────────────────────── */}
           {mode === 'login' && (
@@ -355,6 +443,17 @@ export default function Login({ onLoginSuccess }) {
                   Demo: admin/admin123 • officer1/officer123 • demo_user/demo123
                 </p>
 
+                {/* Browse-as-guest escape hatch (only shown when login overlay is triggered) */}
+                {onCancel && (
+                  <button
+                    type="button"
+                    onClick={onCancel}
+                    className="text-xs text-slate-500 hover:text-slate-700 w-full text-center mt-1 cursor-pointer transition-colors"
+                  >
+                    ← Continue browsing as guest
+                  </button>
+                )}
+
                 {/* Switch to register */}
                 <p
                   className="text-sm text-slate-500 text-center"
@@ -390,100 +489,175 @@ export default function Login({ onLoginSuccess }) {
                 </div>
               )}
 
-              <form onSubmit={handleRegister} className="space-y-4">
-                <div>
-                  <label
-                    htmlFor="reg-fullname"
-                    className="block text-sm font-medium mb-1.5"
-                    style={{ color: '#16213E', fontFamily: "'IBM Plex Sans', sans-serif" }}
-                  >
-                    Full Name
-                  </label>
-                  <input
-                    id="reg-fullname"
-                    type="text"
-                    required
-                    autoComplete="name"
-                    value={regFullName}
-                    onChange={(e) => setRegFullName(e.target.value)}
-                    placeholder="Your full name"
-                    className="w-full px-4 py-3 rounded-md border border-slate-300 bg-white text-slate-900 text-sm
-                               placeholder:text-slate-400 outline-none transition-colors
-                               focus:outline-none focus:border-[#E8871E] focus:ring-1 focus:ring-[#E8871E]"
-                    style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}
-                  />
-                </div>
-
-                <div>
-                  <label
-                    htmlFor="reg-username"
-                    className="block text-sm font-medium mb-1.5"
-                    style={{ color: '#16213E', fontFamily: "'IBM Plex Sans', sans-serif" }}
-                  >
-                    Username
-                  </label>
-                  <input
-                    id="reg-username"
-                    type="text"
-                    required
-                    autoComplete="username"
-                    value={regUsername}
-                    onChange={(e) => setRegUsername(e.target.value)}
-                    placeholder="Choose a username"
-                    className="w-full px-4 py-3 rounded-md border border-slate-300 bg-white text-slate-900 text-sm
-                               placeholder:text-slate-400 outline-none transition-colors
-                               focus:outline-none focus:border-[#E8871E] focus:ring-1 focus:ring-[#E8871E]"
-                    style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}
-                  />
-                </div>
-
-                <div>
-                  <label
-                    htmlFor="reg-password"
-                    className="block text-sm font-medium mb-1.5"
-                    style={{ color: '#16213E', fontFamily: "'IBM Plex Sans', sans-serif" }}
-                  >
-                    Password
-                  </label>
-                  <PasswordField
-                    id="reg-password"
-                    value={regPassword}
-                    onChange={(e) => setRegPassword(e.target.value)}
-                    autoComplete="new-password"
-                    placeholder="••••••••"
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={isLoading}
-                  className="w-full bg-[#16213E] hover:bg-[#1f2d54] text-white font-medium py-3 px-4
-                             rounded-md transition-colors text-sm shadow-sm cursor-pointer
-                             disabled:opacity-60 disabled:cursor-not-allowed mt-2"
-                  style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}
-                >
-                  {isLoading ? 'Creating account...' : 'Create Account'}
-                </button>
-
-                {/* Switch back to login */}
-                <p
-                  className="text-sm text-slate-500 text-center"
-                  style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}
-                >
-                  Already have an account?{' '}
+              {regPendingNotice ? (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-6 text-center space-y-3">
+                  <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="10" />
+                      <polyline points="12 6 12 12 16 14" />
+                    </svg>
+                  </div>
+                  <h3 className="font-semibold text-slate-800 text-lg" style={{ fontFamily: "'Fraunces', serif" }}>
+                    Account Pending Approval
+                  </h3>
+                  <p className="text-sm text-slate-600 leading-relaxed">
+                    Your account is pending admin approval. Once approved, an admin will assign you to a specific project — you&apos;ll only be able to see that project.
+                  </p>
                   <button
                     type="button"
-                    onClick={() => switchMode('login')}
-                    className="font-medium text-amber-600 hover:underline cursor-pointer bg-transparent border-none p-0"
+                    onClick={() => {
+                      setRegPendingNotice(false);
+                      setUsername(regUsername);
+                      setPassword('');
+                      switchMode('login');
+                    }}
+                    className="w-full bg-[#16213E] hover:bg-[#1f2d54] text-white font-medium py-2.5 px-4 rounded-md transition-colors text-sm shadow-sm cursor-pointer mt-2"
+                  >
+                    Go to Log In
+                  </button>
+                </div>
+              ) : (
+                <form onSubmit={handleRegister} className="space-y-4">
+                  {/* Account Type selection */}
+                  <div>
+                    <label
+                      className="block text-sm font-medium mb-1.5"
+                      style={{ color: '#16213E', fontFamily: "'IBM Plex Sans', sans-serif" }}
+                    >
+                      I want to register as
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setRegRole('public')}
+                        className={`py-2 px-3 text-xs font-semibold rounded-md border text-center transition-all cursor-pointer ${
+                          regRole === 'public'
+                            ? 'bg-[#16213E] text-white border-[#16213E] shadow-sm'
+                            : 'bg-white text-slate-600 border-slate-300 hover:border-slate-400'
+                        }`}
+                      >
+                        Public Citizen
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRegRole('contractor')}
+                        className={`py-2 px-3 text-xs font-semibold rounded-md border text-center transition-all cursor-pointer ${
+                          regRole === 'contractor'
+                            ? 'bg-[#E8871E] text-white border-[#E8871E] shadow-sm'
+                            : 'bg-white text-slate-600 border-slate-300 hover:border-slate-400'
+                        }`}
+                      >
+                        Sign up as Contractor
+                      </button>
+                    </div>
+                    {regRole === 'contractor' && (
+                      <p className="mt-1.5 text-xs text-amber-800 bg-amber-50 p-2 rounded border border-amber-200 leading-tight">
+                        Note: Contractor accounts require admin approval and project assignment — contractors will only see their assigned project, not the full platform.
+                      </p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="reg-fullname"
+                      className="block text-sm font-medium mb-1.5"
+                      style={{ color: '#16213E', fontFamily: "'IBM Plex Sans', sans-serif" }}
+                    >
+                      Full Name
+                    </label>
+                    <input
+                      id="reg-fullname"
+                      type="text"
+                      required
+                      autoComplete="name"
+                      value={regFullName}
+                      onChange={(e) => setRegFullName(e.target.value)}
+                      placeholder={regRole === 'contractor' ? "e.g. Larsen & Toubro / Jane Doe" : "Your full name"}
+                      className="w-full px-4 py-3 rounded-md border border-slate-300 bg-white text-slate-900 text-sm
+                                 placeholder:text-slate-400 outline-none transition-colors
+                                 focus:outline-none focus:border-[#E8871E] focus:ring-1 focus:ring-[#E8871E]"
+                      style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="reg-username"
+                      className="block text-sm font-medium mb-1.5"
+                      style={{ color: '#16213E', fontFamily: "'IBM Plex Sans', sans-serif" }}
+                    >
+                      Username
+                    </label>
+                    <input
+                      id="reg-username"
+                      type="text"
+                      required
+                      autoComplete="username"
+                      value={regUsername}
+                      onChange={(e) => setRegUsername(e.target.value)}
+                      placeholder="Choose a username"
+                      className="w-full px-4 py-3 rounded-md border border-slate-300 bg-white text-slate-900 text-sm
+                                 placeholder:text-slate-400 outline-none transition-colors
+                                 focus:outline-none focus:border-[#E8871E] focus:ring-1 focus:ring-[#E8871E]"
+                      style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="reg-password"
+                      className="block text-sm font-medium mb-1.5"
+                      style={{ color: '#16213E', fontFamily: "'IBM Plex Sans', sans-serif" }}
+                    >
+                      Password
+                    </label>
+                    <PasswordField
+                      id="reg-password"
+                      value={regPassword}
+                      onChange={(e) => setRegPassword(e.target.value)}
+                      autoComplete="new-password"
+                      placeholder="••••••••"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isLoading}
+                    className="w-full bg-[#16213E] hover:bg-[#1f2d54] text-white font-medium py-3 px-4
+                               rounded-md transition-colors text-sm shadow-sm cursor-pointer
+                               disabled:opacity-60 disabled:cursor-not-allowed mt-2"
                     style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}
                   >
-                    Log in
+                    {isLoading ? 'Creating account...' : regRole === 'contractor' ? 'Submit Contractor Registration' : 'Create Account'}
                   </button>
-                </p>
-              </form>
+
+                  {/* Switch back to login */}
+                  <p
+                    className="text-sm text-slate-500 text-center"
+                    style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}
+                  >
+                    Already have an account?{' '}
+                    <button
+                      type="button"
+                      onClick={() => switchMode('login')}
+                      className="font-medium text-amber-600 hover:underline cursor-pointer bg-transparent border-none p-0"
+                      style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}
+                    >
+                      Log in
+                    </button>
+                  </p>
+                </form>
+              )}
             </>
           )}
 
+        </div>
+        {/* Subtle bottom footer anchor */}
+        <div
+          className="w-full max-w-sm pb-2 text-center text-xs text-slate-400"
+          style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}
+        >
+          Ministry of Statistics and Programme Implementation • Government of India
         </div>
       </div>
     </div>
