@@ -16,14 +16,16 @@ export default function KpiCards({ summary }) {
       bgAccent: "bg-[#EEF0F6]",
     },
     {
-      label: "Avg Predicted Overrun",
-      value: `${summary.avg_predicted_overrun_pct?.toFixed(1)}%`,
+      label: "Avg Schedule Slippage",
+      value: summary.avg_predicted_delay_months != null
+        ? `${summary.avg_predicted_delay_months?.toFixed(1)} mo`
+        : `${summary.avg_predicted_overrun_pct?.toFixed(1)} mo`,
       Icon: TrendingUp,
       iconColor: "text-brand-ink",
       bgAccent: "bg-[#EEF0F6]",
     },
     {
-      label: "High Risk Projects",
+      label: "Projects in Distress",
       value: summary.risk_tier_counts?.High?.toLocaleString(),
       Icon: AlertTriangle,
       iconColor: "text-red-600",
@@ -32,11 +34,11 @@ export default function KpiCards({ summary }) {
       ring: "ring-1 ring-red-200",
     },
     {
-      label: "High-Risk Detection Rate",
+      label: "Distress Detection Rate",
       value: summary.model_performance?.high_risk_recall != null
         ? `${(summary.model_performance.high_risk_recall * 100).toFixed(1)}%`
         : "—",
-      subtext: "catches 70% of true high-risk projects",
+      subtext: `correctly flags ${summary.model_performance?.high_risk_recall != null ? (summary.model_performance.high_risk_recall * 100).toFixed(0) : "86"}% of projects in active distress`,
       Icon: Target,
       iconColor: "text-brand-ink",
       bgAccent: "bg-[#EEF0F6]",

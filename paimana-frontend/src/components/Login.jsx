@@ -260,9 +260,9 @@ export default function Login({ onLoginSuccess, onCancel }) {
                   </svg>
                 </div>
                 <div>
-                  <div className="text-sm font-semibold text-white tracking-wide">Predictive Cost-Overrun Intelligence</div>
+                  <div className="text-sm font-semibold text-white tracking-wide">Live Portfolio Distress Diagnostics</div>
                   <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">
-                    Machine learning risk scoring trained on bidding dynamics, duration targets, and raw material inflation.
+                    Machine learning trained on 1,731 real Indian infrastructure projects, screening for schedule and cost distress using project age, burn rate, and progress signals.
                   </p>
                 </div>
               </div>
@@ -306,7 +306,7 @@ export default function Login({ onLoginSuccess, onCancel }) {
                 className="font-semibold text-base sm:text-lg"
                 style={{ color: '#E8871E', fontFamily: "'IBM Plex Mono', monospace" }}
               >
-                1,451
+                1,731
               </span>
               <span className="text-slate-300 text-xs mt-0.5" style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}>
                 projects tracked
@@ -318,10 +318,10 @@ export default function Login({ onLoginSuccess, onCancel }) {
                 className="font-semibold text-base sm:text-lg"
                 style={{ color: '#E8871E', fontFamily: "'IBM Plex Mono', monospace" }}
               >
-                685
+                427
               </span>
               <span className="text-slate-300 text-xs mt-0.5" style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}>
-                flagged for review
+                high risk flagged
               </span>
             </div>
 
@@ -330,7 +330,7 @@ export default function Login({ onLoginSuccess, onCancel }) {
                 className="font-semibold text-base sm:text-lg"
                 style={{ color: '#E8871E', fontFamily: "'IBM Plex Mono', monospace" }}
               >
-                70.0%
+                85.9%
               </span>
               <span className="text-slate-300 text-xs mt-0.5" style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}>
                 high-risk recall
@@ -436,13 +436,53 @@ export default function Login({ onLoginSuccess, onCancel }) {
                   {isLoading ? 'Logging in...' : 'Log In'}
                 </button>
 
-                {/* Demo credentials hint */}
-                <p
-                  className="pt-2 text-xs text-slate-400 text-center leading-relaxed"
-                  style={{ fontFamily: "'IBM Plex Mono', monospace" }}
-                >
-                  Demo: admin/admin123 • officer1/officer123 • demo_user/demo123
-                </p>
+                {/* Demo credentials quick-fills */}
+                <div className="pt-2 text-center">
+                  <span
+                    className="text-[11px] text-slate-400 block mb-1.5"
+                    style={{ fontFamily: "'IBM Plex Mono', monospace" }}
+                  >
+                    Quick Demo Logins (Click to autofill):
+                  </span>
+                  <div className="flex flex-wrap items-center justify-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => { setUsername('admin'); setPassword('admin123'); }}
+                      className="px-2 py-0.5 rounded text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-colors cursor-pointer"
+                      style={{ fontFamily: "'IBM Plex Mono', monospace" }}
+                      title="Admin login"
+                    >
+                      admin
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setUsername('officer1'); setPassword('officer123'); }}
+                      className="px-2 py-0.5 rounded text-[11px] bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 transition-colors cursor-pointer"
+                      style={{ fontFamily: "'IBM Plex Mono', monospace" }}
+                      title="Field Officer login"
+                    >
+                      officer1
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setUsername('contractor1'); setPassword('contractor123'); }}
+                      className="px-2 py-0.5 rounded text-[11px] bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 transition-colors cursor-pointer"
+                      style={{ fontFamily: "'IBM Plex Mono', monospace" }}
+                      title="Contractor login"
+                    >
+                      contractor1
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setUsername('demo_user'); setPassword('demo123'); }}
+                      className="px-2 py-0.5 rounded text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 transition-colors cursor-pointer"
+                      style={{ fontFamily: "'IBM Plex Mono', monospace" }}
+                      title="Public Citizen login"
+                    >
+                      demo_user
+                    </button>
+                  </div>
+                </div>
 
                 {/* Browse-as-guest escape hatch (only shown when login overlay is triggered) */}
                 {onCancel && (
@@ -502,7 +542,7 @@ export default function Login({ onLoginSuccess, onCancel }) {
                     Account Pending Approval
                   </h3>
                   <p className="text-sm text-slate-600 leading-relaxed">
-                    Your account is pending admin approval. Once approved, an admin will assign you to a specific project — you&apos;ll only be able to see that project.
+                    Your {regRole === 'field_officer' ? 'Field Officer' : 'Contractor'} account is pending admin verification and project assignment. Once approved, you will have access to your assigned project portal.
                   </p>
                   <button
                     type="button"
@@ -527,11 +567,11 @@ export default function Login({ onLoginSuccess, onCancel }) {
                     >
                       I want to register as
                     </label>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-3 gap-2">
                       <button
                         type="button"
                         onClick={() => setRegRole('public')}
-                        className={`py-2 px-3 text-xs font-semibold rounded-md border text-center transition-all cursor-pointer ${
+                        className={`py-2 px-1 text-xs font-semibold rounded-md border text-center transition-all cursor-pointer ${
                           regRole === 'public'
                             ? 'bg-[#16213E] text-white border-[#16213E] shadow-sm'
                             : 'bg-white text-slate-600 border-slate-300 hover:border-slate-400'
@@ -542,18 +582,34 @@ export default function Login({ onLoginSuccess, onCancel }) {
                       <button
                         type="button"
                         onClick={() => setRegRole('contractor')}
-                        className={`py-2 px-3 text-xs font-semibold rounded-md border text-center transition-all cursor-pointer ${
+                        className={`py-2 px-1 text-xs font-semibold rounded-md border text-center transition-all cursor-pointer ${
                           regRole === 'contractor'
                             ? 'bg-[#E8871E] text-white border-[#E8871E] shadow-sm'
                             : 'bg-white text-slate-600 border-slate-300 hover:border-slate-400'
                         }`}
                       >
-                        Sign up as Contractor
+                        Contractor
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRegRole('field_officer')}
+                        className={`py-2 px-1 text-xs font-semibold rounded-md border text-center transition-all cursor-pointer ${
+                          regRole === 'field_officer'
+                            ? 'bg-blue-700 text-white border-blue-700 shadow-sm'
+                            : 'bg-white text-slate-600 border-slate-300 hover:border-slate-400'
+                        }`}
+                      >
+                        Field Officer
                       </button>
                     </div>
                     {regRole === 'contractor' && (
-                      <p className="mt-1.5 text-xs text-amber-800 bg-amber-50 p-2 rounded border border-amber-200 leading-tight">
-                        Note: Contractor accounts require admin approval and project assignment — contractors will only see their assigned project, not the full platform.
+                      <p className="mt-2 text-xs text-amber-800 bg-amber-50 p-2.5 rounded border border-amber-200 leading-tight">
+                        Note: Contractor accounts require admin verification and project assignment — contractors only see their assigned project contract.
+                      </p>
+                    )}
+                    {regRole === 'field_officer' && (
+                      <p className="mt-2 text-xs text-blue-800 bg-blue-50 p-2.5 rounded border border-blue-200 leading-tight">
+                        Note: Field Officer accounts require departmental verification & assignment before weekly field audit reporting is enabled.
                       </p>
                     )}
                   </div>
@@ -573,7 +629,13 @@ export default function Login({ onLoginSuccess, onCancel }) {
                       autoComplete="name"
                       value={regFullName}
                       onChange={(e) => setRegFullName(e.target.value)}
-                      placeholder={regRole === 'contractor' ? "e.g. Larsen & Toubro / Jane Doe" : "Your full name"}
+                      placeholder={
+                        regRole === 'contractor'
+                          ? 'e.g. Larsen & Toubro / Jane Doe'
+                          : regRole === 'field_officer'
+                          ? 'e.g. Er. Rajesh Kumar (EE, MoSPI/NHAI)'
+                          : 'Your full name'
+                      }
                       className="w-full px-4 py-3 rounded-md border border-slate-300 bg-white text-slate-900 text-sm
                                  placeholder:text-slate-400 outline-none transition-colors
                                  focus:outline-none focus:border-[#E8871E] focus:ring-1 focus:ring-[#E8871E]"

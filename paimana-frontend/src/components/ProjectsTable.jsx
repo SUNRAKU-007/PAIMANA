@@ -19,27 +19,26 @@ const TIER_BADGE = {
 const TIER_ORDER = { Low: 0, Medium: 1, High: 2 };
 
 const COLUMNS = [
-  { key: "project_id",            label: "Project ID",          sortable: true },
-  { key: "engineers_estimate",    label: "Engineer's Estimate",  sortable: true },
-  { key: "bid_total",             label: "Bid Total",            sortable: true },
-  { key: "bid_days",              label: "Bid Days",             sortable: true },
-  { key: "predicted_overrun_pct", label: "Predicted Overrun %",  sortable: true },
-  { key: "predicted_risk_tier",   label: "Risk Tier",            sortable: true },
+  { key: "project_id",             label: "Project",             sortable: true },
+  { key: "original_cost_cr",       label: "Original Cost",       sortable: true },
+  { key: "cumulative_expenditure_cr", label: "Cumulative Spend", sortable: true },
+  { key: "delay_months",           label: "Actual Delay",        sortable: true },
+  { key: "predicted_delay_months", label: "Schedule Slippage", sortable: true },
+  { key: "predicted_risk_tier",    label: "Distress Tier",      sortable: true },
 ];
 
-function fmtCurrency(n) {
-  return (
-    "$" +
-    Number(n).toLocaleString("en-US", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    })
-  );
+function fmtCrores(n) {
+  if (n == null || isNaN(Number(n))) return "—";
+  return `₹${Number(n).toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} Cr`;
 }
 
-function fmtOverrun(n) {
+function fmtMonths(n) {
+  if (n == null || isNaN(Number(n))) return "—";
   const val = Number(n).toFixed(1);
-  return n > 0 ? `+${val}%` : `${val}%`;
+  return Number(n) > 0 ? `+${val} mo` : `${val} mo`;
 }
 
 function SortIcon({ col, sortCol, sortDir }) {
@@ -65,9 +64,16 @@ export default function ProjectsTable({ projects = [], onRowClick }) {
 
   // ── Filter ──────────────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
+    const q = idFilter.trim().toLowerCase();
     return projects.filter((p) => {
       const tierOk = tierFilter === "All" || p.predicted_risk_tier === tierFilter;
-      const idOk   = idFilter === "" || String(p.project_id).includes(idFilter.trim());
+      const idOk =
+        q === "" ||
+        String(p.project_id).toLowerCase().includes(q) ||
+        (p.project_name && p.project_name.toLowerCase().includes(q)) ||
+        (p.sector && p.sector.toLowerCase().includes(q)) ||
+        (p.ministry && p.ministry.toLowerCase().includes(q)) ||
+        (p.state && p.state.toLowerCase().includes(q));
       return tierOk && idOk;
     });
   }, [projects, tierFilter, idFilter]);
@@ -77,7 +83,19 @@ export default function ProjectsTable({ projects = [], onRowClick }) {
     return [...filtered].sort((a, b) => {
       let av = a[sortCol];
       let bv = b[sortCol];
-      if (sortCol === "predicted_risk_tier") {
+      if (sortCol === "original_cost_cr") {
+        av = av ?? a.engineers_estimate;
+        bv = bv ?? b.engineers_estimate;
+      } else if (sortCol === "cumulative_expenditure_cr") {
+        av = av ?? a.bid_total;
+        bv = bv ?? b.bid_total;
+      } else if (sortCol === "delay_months") {
+        av = av ?? a.bid_days;
+        bv = bv ?? b.bid_days;
+      } else if (sortCol === "predicted_delay_months") {
+        av = av ?? a.predicted_overrun_pct;
+        bv = bv ?? b.predicted_overrun_pct;
+      } else if (sortCol === "predicted_risk_tier") {
         av = TIER_ORDER[av] ?? 0;
         bv = TIER_ORDER[bv] ?? 0;
       }
@@ -124,12 +142,12 @@ export default function ProjectsTable({ projects = [], onRowClick }) {
           <input
             id="project-id-filter"
             type="text"
-            placeholder="Search project ID…"
+            placeholder="Search project name, ID, sector..."
             value={idFilter}
             onChange={handleIdChange}
             className="pl-9 pr-4 py-2 text-sm rounded-lg border border-slate-200 bg-slate-50
                        focus:outline-none focus:ring-2 focus:ring-brand-amber/50 focus:border-brand-amber
-                       placeholder:text-slate-400 w-48"
+                       placeholder:text-slate-400 w-64"
           />
         </div>
 
@@ -144,7 +162,7 @@ export default function ProjectsTable({ projects = [], onRowClick }) {
         >
           {["All", "Low", "Medium", "High"].map((t) => (
             <option key={t} value={t}>
-              {t === "All" ? "All Risk Tiers" : t}
+              {t === "All" ? "All Distress Tiers" : t}
             </option>
           ))}
         </select>
@@ -188,11 +206,16 @@ export default function ProjectsTable({ projects = [], onRowClick }) {
               </tr>
             ) : (
               pageRows.map((p) => {
-                const overrun = Number(p.predicted_overrun_pct);
-                const overrunColor =
-                  overrun > 10  ? "text-red-600 font-semibold" :
-                  overrun > 0   ? "text-amber-600"             :
-                                  "text-green-700";
+                const delayVal = p.predicted_delay_months ?? p.predicted_overrun_pct;
+                const delayNum = Number(delayVal);
+                const delayColor =
+                  delayNum > 12  ? "text-red-600 font-semibold" :
+                  delayNum > 0   ? "text-amber-600"             :
+                                   "text-green-700";
+
+                const actualDelayText = p.delay_months != null
+                  ? `${Math.round(p.delay_months)} mo`
+                  : (p.bid_days != null ? `${Math.round(p.bid_days)} days` : "—");
 
                 return (
                   <tr
@@ -201,22 +224,34 @@ export default function ProjectsTable({ projects = [], onRowClick }) {
                     className="border-b border-slate-100 hover:bg-slate-50 cursor-pointer
                                transition-colors duration-100"
                   >
-                    <td className="px-5 py-3.5 font-mono text-slate-700 font-medium">
-                      #{p.project_id}
-                    </td>
-                    <td className="px-5 py-3.5 text-slate-700">
-                      {fmtCurrency(p.engineers_estimate)}
-                    </td>
-                    <td className="px-5 py-3.5 text-slate-700">
-                      {fmtCurrency(p.bid_total)}
-                    </td>
-                    <td className="px-5 py-3.5 text-slate-600">
-                      {Math.round(p.bid_days)} days
-                    </td>
-                    <td className={`px-5 py-3.5 ${overrunColor}`}>
-                      {fmtOverrun(p.predicted_overrun_pct)}
-                    </td>
                     <td className="px-5 py-3.5">
+                      <div className="font-mono text-xs font-semibold text-slate-800">
+                        #{p.project_id}
+                      </div>
+                      {p.project_name && (
+                        <div className="text-xs text-slate-600 truncate max-w-xs font-sans mt-0.5" title={p.project_name}>
+                          {p.project_name}
+                        </div>
+                      )}
+                      {(p.sector || p.state) && (
+                        <div className="text-[11px] text-slate-400 font-sans mt-0.5">
+                          {[p.sector, p.state].filter(Boolean).join(" • ")}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-5 py-3.5 text-slate-700 whitespace-nowrap">
+                      {fmtCrores(p.original_cost_cr ?? p.engineers_estimate)}
+                    </td>
+                    <td className="px-5 py-3.5 text-slate-700 whitespace-nowrap">
+                      {fmtCrores(p.cumulative_expenditure_cr ?? p.bid_total)}
+                    </td>
+                    <td className="px-5 py-3.5 text-slate-600 whitespace-nowrap">
+                      {actualDelayText}
+                    </td>
+                    <td className={`px-5 py-3.5 whitespace-nowrap ${delayColor}`}>
+                      {fmtMonths(delayVal)}
+                    </td>
+                    <td className="px-5 py-3.5 whitespace-nowrap">
                       <span
                         className={`inline-block rounded-full px-2 py-1 text-xs font-medium
                                     ${TIER_BADGE[p.predicted_risk_tier] ?? "bg-slate-100 text-slate-600"}`}

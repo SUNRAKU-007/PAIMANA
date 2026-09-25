@@ -65,11 +65,11 @@ export default function ContractorApprovals({ authFetch }) {
               className="text-2xl font-bold text-slate-900 tracking-tight"
               style={{ fontFamily: "'Fraunces', serif" }}
             >
-              Contractor Approvals
+              Account Approvals
             </h1>
           </div>
           <p className="text-sm text-slate-500 mt-1" style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}>
-            Review pending contractor account requests. Approved contractors are eligible for project assignment — they will only see the specific project an admin assigns them to, not the full platform.
+            Review pending contractor and field officer account requests. Approved users are eligible for project assignment to submit weekly field reports or manage contractor contracts.
           </p>
         </div>
 
@@ -103,7 +103,7 @@ export default function ContractorApprovals({ authFetch }) {
       {isLoading ? (
         <div className="bg-white rounded-xl border border-slate-200 p-12 text-center shadow-sm">
           <div className="w-8 h-8 border-2 border-[#16213E] border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-sm text-slate-500">Loading pending contractor requests...</p>
+          <p className="text-sm text-slate-500">Loading pending approval requests...</p>
         </div>
       ) : pendingContractors.length === 0 ? (
         /* Empty state */
@@ -115,11 +115,11 @@ export default function ContractorApprovals({ authFetch }) {
             No Pending Approvals
           </h3>
           <p className="text-sm text-slate-500 mt-1 max-w-md mx-auto">
-            All registered contractors have been reviewed and approved. When a new contractor signs up, their profile will appear here for verification.
+            All registered contractors and field officers have been reviewed. When a new officer or contractor signs up, their profile will appear here for verification.
           </p>
         </div>
       ) : (
-        /* Table of pending contractors */
+        /* Table of pending users */
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="px-6 py-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
@@ -131,6 +131,7 @@ export default function ContractorApprovals({ authFetch }) {
             {pendingContractors.map((c) => {
               const cId = c.id || c.user_id || c.username;
               const isApproving = approvingId === cId;
+              const isOfficer = c.role === 'field_officer' || c.role === 'officer';
 
               return (
                 <div
@@ -138,8 +139,14 @@ export default function ContractorApprovals({ authFetch }) {
                   className="px-6 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-slate-50/70 transition-colors"
                 >
                   <div className="flex items-start sm:items-center gap-3.5">
-                    <div className="w-10 h-10 rounded-full bg-[#16213E]/10 text-[#16213E] font-bold text-sm flex items-center justify-center shrink-0 uppercase">
-                      {(c.full_name || c.username || 'C').slice(0, 2)}
+                    <div
+                      className={`w-10 h-10 rounded-full font-bold text-sm flex items-center justify-center shrink-0 uppercase ${
+                        isOfficer
+                          ? 'bg-blue-100 text-blue-800'
+                          : 'bg-amber-100 text-amber-800'
+                      }`}
+                    >
+                      {(c.full_name || c.username || (isOfficer ? 'FO' : 'CO')).slice(0, 2)}
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
@@ -149,15 +156,20 @@ export default function ContractorApprovals({ authFetch }) {
                         <span className="text-xs font-mono text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">
                           @{c.username}
                         </span>
+                        <span
+                          className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${
+                            isOfficer
+                              ? 'bg-blue-50 text-blue-700 border-blue-200'
+                              : 'bg-amber-50 text-amber-800 border-amber-200'
+                          }`}
+                        >
+                          {isOfficer ? 'Field Officer' : 'Contractor'}
+                        </span>
                       </div>
                       <div className="flex items-center gap-2 mt-1">
-                        <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200/80 px-2 py-0.5 rounded-full">
+                        <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-slate-100 text-slate-600 border border-slate-200 px-2 py-0.5 rounded-full">
                           <Clock size={11} />
                           Pending Admin Verification
-                        </span>
-                        <span className="text-xs text-slate-400">•</span>
-                        <span className="text-xs text-slate-500 capitalize">
-                          Role: {c.role || 'contractor'}
                         </span>
                         {c.created_at && (
                           <>
@@ -185,7 +197,7 @@ export default function ContractorApprovals({ authFetch }) {
                       ) : (
                         <>
                           <UserCheck size={14} />
-                          Approve Contractor
+                          {isOfficer ? 'Approve Officer' : 'Approve Contractor'}
                         </>
                       )}
                     </button>

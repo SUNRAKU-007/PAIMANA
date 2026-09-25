@@ -28,9 +28,83 @@ function AddProjectModal({ authFetch, onSuccess, onClose }) {
 
   const set = (field) => (e) => setForm((f) => ({ ...f, [field]: e.target.value }));
 
+  // Auto-format MM/YYYY input with strict 01-12 month enforcement
+  const handleDateChange = (field) => (e) => {
+    let clean = e.target.value.replace(/[^\d/]/g, '');
+    const prevVal = form[field] || '';
+    const isDeleting = clean.length < prevVal.length;
+
+    if (isDeleting) {
+      if (prevVal.endsWith('/') && clean === prevVal.slice(0, -1)) {
+        clean = clean.slice(0, -1);
+      }
+      setForm((f) => ({ ...f, [field]: clean }));
+      return;
+    }
+
+    let m = '';
+    let y = '';
+    if (clean.includes('/')) {
+      const parts = clean.split('/');
+      m = parts[0].replace(/\D/g, '').slice(0, 2);
+      y = parts.slice(1).join('').replace(/\D/g, '').slice(0, 4);
+    } else {
+      const digits = clean.replace(/\D/g, '').slice(0, 6);
+      if (digits.length === 1) {
+        const d1 = parseInt(digits, 10);
+        // Digits 2-9 cannot start a valid month (max month is 12) -> auto-convert to 02-09/
+        if (d1 >= 2) {
+          setForm((f) => ({ ...f, [field]: `0${d1}/` }));
+          return;
+        }
+        setForm((f) => ({ ...f, [field]: digits }));
+        return;
+      } else if (digits.length >= 2) {
+        m = digits.slice(0, 2);
+        y = digits.slice(2);
+      }
+    }
+
+    // Strict 1-12 validation for the month portion
+    if (m.length === 1 && clean.includes('/')) {
+      const d = parseInt(m, 10);
+      m = d === 0 ? '01' : `0${d}`;
+    } else if (m.length === 2) {
+      let mNum = parseInt(m, 10);
+      if (mNum > 12) m = '12';
+      else if (mNum === 0) m = '01';
+    }
+
+    let result = '';
+    if (y) {
+      result = `${m}/${y}`;
+    } else if (m.length === 2 || (m.length === 1 && clean.includes('/'))) {
+      result = `${m}/`;
+    } else {
+      result = m;
+    }
+
+    setForm((f) => ({ ...f, [field]: result }));
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.name.trim()) { setError('Project name is required.'); return; }
+
+    // Validate MM/YYYY format and month range 01-12
+    const dateRegex = /^(0[1-9]|1[0-2])\/\d{4}$/;
+    for (const [key, label] of [
+      ['approval_date', 'Approval Date'],
+      ['start_date', 'Start Date'],
+      ['target_doc', 'Target Completion'],
+    ]) {
+      const val = form[key].trim();
+      if (val && !dateRegex.test(val)) {
+        setError(`${label} must be a valid month and 4-digit year (MM/YYYY with month 01–12, e.g. 07/2025).`);
+        return;
+      }
+    }
+
     setSubmitting(true);
     setError(null);
 
@@ -143,16 +217,34 @@ function AddProjectModal({ authFetch, onSuccess, onClose }) {
           {/* Date fields */}
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className={labelCls}>Approval Date</label>
-              <input className={fieldCls} value={form.approval_date} onChange={set('approval_date')} placeholder="MM/YYYY" />
+              <label className={labelCls}>Approval Date <span className="text-slate-400 font-normal">(01–12)</span></label>
+              <input
+                className={fieldCls}
+                value={form.approval_date}
+                onChange={handleDateChange('approval_date')}
+                placeholder="MM/YYYY"
+                maxLength={7}
+              />
             </div>
             <div>
-              <label className={labelCls}>Start Date</label>
-              <input className={fieldCls} value={form.start_date} onChange={set('start_date')} placeholder="MM/YYYY" />
+              <label className={labelCls}>Start Date <span className="text-slate-400 font-normal">(01–12)</span></label>
+              <input
+                className={fieldCls}
+                value={form.start_date}
+                onChange={handleDateChange('start_date')}
+                placeholder="MM/YYYY"
+                maxLength={7}
+              />
             </div>
             <div>
-              <label className={labelCls}>Target Completion</label>
-              <input className={fieldCls} value={form.target_doc} onChange={set('target_doc')} placeholder="MM/YYYY" />
+              <label className={labelCls}>Target Completion <span className="text-slate-400 font-normal">(01–12)</span></label>
+              <input
+                className={fieldCls}
+                value={form.target_doc}
+                onChange={handleDateChange('target_doc')}
+                placeholder="MM/YYYY"
+                maxLength={7}
+              />
             </div>
           </div>
 
@@ -192,10 +284,12 @@ export default function IndiaProjectsView({
   selectedProject: controlledSelectedProject,
   onSelectProject,
 }) {
+  const PAGE_SIZE = 24;
   const [activeTab, setActiveTab] = useState('All');
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [projects, setProjects] = useState([]);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [internalSelectedProject, setInternalSelectedProject] = useState(null);
@@ -267,7 +361,8 @@ export default function IndiaProjectsView({
       .catch((err) => {
         if (!isCancelled) {
           console.error('Failed to load India projects:', err);
-          setError('Could not load Indian infrastructure projects.');
+          const detail = err?.response?.data?.detail;
+          setError(detail || 'Could not load Indian infrastructure projects.');
           setLoading(false);
         }
       });
@@ -359,7 +454,7 @@ export default function IndiaProjectsView({
                 <button
                   key={tab}
                   type="button"
-                  onClick={() => setActiveTab(tab)}
+                  onClick={() => { setActiveTab(tab); setPage(1); }}
                   className={`rounded-full border px-4 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
                     isActive
                       ? 'bg-brand-ink text-white border-brand-ink shadow-sm'
@@ -391,15 +486,15 @@ export default function IndiaProjectsView({
               <input
                 type="text"
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Search project name..."
+                onChange={(e) => { setSearchTerm(e.target.value); setPage(1); }}
+                placeholder="Search project, state, sector, ID..."
                 className="w-full pl-9 pr-8 py-1.5 text-sm bg-white border border-slate-200 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-amber/50 focus:border-brand-amber transition-colors shadow-sm"
               />
               <svg className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
               </svg>
               {searchTerm && (
-                <button type="button" onClick={() => setSearchTerm('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer text-xs" title="Clear search">✕</button>
+                <button type="button" onClick={() => { setSearchTerm(''); setPage(1); }} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer text-xs" title="Clear search">✕</button>
               )}
             </div>
           </div>
@@ -408,8 +503,15 @@ export default function IndiaProjectsView({
 
       {/* Result Count (Only for public / admin browse list) */}
       {!isAssignedRole && (
-        <div className="text-sm font-medium text-slate-500 mb-4">
-          {loading ? 'Loading projects...' : `${projects.length} projects`}
+        <div className="text-sm font-medium text-slate-600 mb-4 flex items-center justify-between">
+          <span>
+            {loading ? 'Loading projects...' : `${projects.length.toLocaleString()} projects`}
+          </span>
+          {projects.length > PAGE_SIZE && !loading && (
+            <span className="text-xs text-slate-400 font-normal">
+              Showing {(Math.min(page, Math.max(1, Math.ceil(projects.length / PAGE_SIZE))) - 1) * PAGE_SIZE + 1}–{Math.min(Math.min(page, Math.max(1, Math.ceil(projects.length / PAGE_SIZE))) * PAGE_SIZE, projects.length)} of {projects.length.toLocaleString()}
+            </span>
+          )}
         </div>
       )}
 
@@ -469,106 +571,178 @@ export default function IndiaProjectsView({
         </div>
       )}
 
-      {/* Card Grid */}
-      {!loading && projects.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {projects.map((project) => {
-            const origCost = project.original_cost_cr;
-            const revCost = project.revised_cost_cr;
-            const hasCostEscalation =
-              revCost != null &&
-              origCost != null &&
-              Number(revCost) !== Number(origCost);
+      {/* Card Grid with Pagination */}
+      {!loading && projects.length > 0 && (() => {
+        const totalPages = Math.max(1, Math.ceil(projects.length / PAGE_SIZE));
+        const safePage = Math.min(page, totalPages);
+        const pageProjects = isAssignedRole ? projects : projects.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
-            return (
-              <div
-                key={project.project_id || project.name}
-                onClick={() => setSelectedProject(project)}
-                className="bg-white rounded-xl shadow-sm p-5 border border-slate-100 hover:shadow-md hover:border-slate-200 transition-all flex flex-col justify-between cursor-pointer"
-              >
-                <div>
-                  {/* Header: Title & Status Badge */}
-                  <div className="flex justify-between items-start gap-3">
-                    <h3
-                      className="font-semibold text-base line-clamp-2 text-slate-900 group-hover:text-brand-ink transition-colors"
-                      title={project.name}
-                    >
-                      {project.name}
-                    </h3>
-                    {renderStatusBadge(project.status)}
-                  </div>
+        return (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {pageProjects.map((project) => {
+                const origCost = project.original_cost_cr;
+                const revCost = project.revised_cost_cr;
+                const hasCostEscalation =
+                  revCost != null &&
+                  origCost != null &&
+                  Number(revCost) !== Number(origCost);
 
-                  {/* Sector & State Subtext */}
-                  <p className="text-xs text-slate-500 mt-1 mb-4">
-                    {[project.sector, project.state].filter(Boolean).join(' • ')}
-                  </p>
-                </div>
-
-                <div>
-                  {/* Cost Section */}
-                  <div className="text-sm">
-                    {hasCostEscalation ? (
-                      <div>
-                        <span className="line-through text-slate-400 font-normal mr-2">
-                          ₹{formatCost(origCost)} Cr
-                        </span>
-                        <span className="font-bold text-red-600">
-                          ₹{formatCost(revCost)} Cr
-                        </span>
+                return (
+                  <div
+                    key={project.project_id || project.name}
+                    onClick={() => setSelectedProject(project)}
+                    className="bg-white rounded-xl shadow-sm p-5 border border-slate-100 hover:shadow-md hover:border-slate-200 transition-all flex flex-col justify-between cursor-pointer group"
+                  >
+                    <div>
+                      {/* Header: Title & Status Badge */}
+                      <div className="flex justify-between items-start gap-3">
+                        <h3
+                          className="font-semibold text-base line-clamp-2 text-slate-900 group-hover:text-brand-ink transition-colors"
+                          title={project.name}
+                        >
+                          {project.name}
+                        </h3>
+                        {renderStatusBadge(project.status)}
                       </div>
-                    ) : (
-                      <span className="font-bold text-slate-900">
-                        {origCost != null ? `₹${formatCost(origCost)} Cr` : '—'}
-                      </span>
-                    )}
-                  </div>
 
-                  {/* Physical Progress Bar (only for Ongoing when present) */}
-                  {project.status === 'Ongoing' && project.physical_progress_pct != null && (
-                    <div className="mt-3">
-                      <div className="flex justify-between items-center text-xs text-slate-600 mb-1 font-medium">
-                        <span>Progress</span>
-                        <span>{project.physical_progress_pct}%</span>
+                      {/* Sector & State Subtext */}
+                      <p className="text-xs text-slate-500 mt-1 mb-4">
+                        {[project.sector, project.state].filter(Boolean).join(' • ')}
+                      </p>
+                    </div>
+
+                    <div>
+                      {/* Cost Section */}
+                      <div className="text-sm">
+                        {hasCostEscalation ? (
+                          <div>
+                            <span className="line-through text-slate-400 font-normal mr-2">
+                              ₹{formatCost(origCost)} Cr
+                            </span>
+                            <span className="font-bold text-red-600">
+                              ₹{formatCost(revCost)} Cr
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="font-bold text-slate-900">
+                            {origCost != null ? `₹${formatCost(origCost)} Cr` : '—'}
+                          </span>
+                        )}
                       </div>
-                      <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
-                        <div
-                          className="bg-brand-ink h-full rounded-full transition-all duration-300"
-                          style={{
-                            width: `${Math.min(100, Math.max(0, project.physical_progress_pct))}%`,
+
+                      {/* Physical Progress Bar (only for Ongoing when present) */}
+                      {project.status === 'Ongoing' && project.physical_progress_pct != null && (
+                        <div className="mt-3">
+                          <div className="flex justify-between items-center text-xs text-slate-600 mb-1 font-medium">
+                            <span>Progress</span>
+                            <span>{project.physical_progress_pct}%</span>
+                          </div>
+                          <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                            <div
+                              className="bg-brand-ink h-full rounded-full transition-all duration-300"
+                              style={{
+                                width: `${Math.min(100, Math.max(0, project.physical_progress_pct))}%`,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Delay Note Callout */}
+                      {project.delay_note && (
+                        <div className="mt-3 bg-red-50 text-red-700 text-xs rounded p-2 border border-red-100">
+                          {project.delay_note}
+                        </div>
+                      )}
+
+                      {/* Assigned role indicator badges */}
+                      {(project.assigned_officer || project.assigned_contractor) && (
+                        <div className="mt-3 flex flex-wrap items-center gap-1.5 pt-2.5 border-t border-slate-100">
+                          {project.assigned_officer && (
+                            <span className="text-[10px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded font-medium border border-blue-200">
+                              Officer: {project.assigned_officer}
+                            </span>
+                          )}
+                          {project.assigned_contractor && (
+                            <span className="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded font-medium border border-emerald-200">
+                              Contractor: {project.assigned_contractor}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Pagination Controls */}
+            {!isAssignedRole && totalPages > 1 && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-5 py-3 mt-6 bg-white rounded-xl border border-slate-200/80 shadow-xs">
+                <p className="text-xs text-slate-500 font-medium">
+                  Page {safePage} of {totalPages}
+                  {" · "}
+                  {(safePage - 1) * PAGE_SIZE + 1}–
+                  {Math.min(safePage * PAGE_SIZE, projects.length)} of{" "}
+                  {projects.length.toLocaleString()}
+                </p>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPage((p) => Math.max(1, p - 1));
+                      window.scrollTo({ top: 380, behavior: 'smooth' });
+                    }}
+                    disabled={safePage === 1}
+                    className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                  >
+                    Previous
+                  </button>
+                  <div className="hidden sm:flex items-center gap-1 px-1">
+                    {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                      let pNum;
+                      if (totalPages <= 5) pNum = i + 1;
+                      else if (safePage <= 3) pNum = i + 1;
+                      else if (safePage >= totalPages - 2) pNum = totalPages - 4 + i;
+                      else pNum = safePage - 2 + i;
+
+                      return (
+                        <button
+                          key={pNum}
+                          type="button"
+                          onClick={() => {
+                            setPage(pNum);
+                            window.scrollTo({ top: 380, behavior: 'smooth' });
                           }}
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Delay Note Callout */}
-                  {project.delay_note && (
-                    <div className="mt-3 bg-red-50 text-red-700 text-xs rounded p-2 border border-red-100">
-                      {project.delay_note}
-                    </div>
-                  )}
-
-                  {/* Assigned role indicator badges */}
-                  {(project.assigned_officer || project.assigned_contractor) && (
-                    <div className="mt-3 flex flex-wrap items-center gap-1.5 pt-2.5 border-t border-slate-100">
-                      {project.assigned_officer && (
-                        <span className="text-[10px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded font-medium border border-blue-200">
-                          Officer: {project.assigned_officer}
-                        </span>
-                      )}
-                      {project.assigned_contractor && (
-                        <span className="text-[10px] bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded font-medium border border-emerald-200">
-                          Contractor: {project.assigned_contractor}
-                        </span>
-                      )}
-                    </div>
-                  )}
+                          className={`w-7 h-7 text-xs rounded-md font-medium transition-colors cursor-pointer ${
+                            safePage === pNum
+                              ? 'bg-[#16213E] text-white font-bold'
+                              : 'text-slate-600 hover:bg-slate-100'
+                          }`}
+                        >
+                          {pNum}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPage((p) => Math.min(totalPages, p + 1));
+                      window.scrollTo({ top: 380, behavior: 'smooth' });
+                    }}
+                    disabled={safePage === totalPages}
+                    className="px-3 py-1.5 text-xs font-semibold rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                  >
+                    Next
+                  </button>
                 </div>
               </div>
-            );
-          })}
-        </div>
-      )}
+            )}
+          </>
+        );
+      })()}
 
       {/* Detail Modal */}
       <IndiaProjectModal

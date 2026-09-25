@@ -53,7 +53,7 @@ export default function WelcomeBanner() {
           </span>
           <span className="text-slate-400 text-xs hidden sm:inline">•</span>
           <p className="text-xs text-slate-300 truncate">
-            Tracking 54 real Indian infrastructure projects &amp; 1,451+ bids with live risk evaluation.
+            Tracking 1,731 ongoing Indian infrastructure projects across 21 sectors with AI schedule &amp; cost risk intelligence.
           </p>
         </div>
 
@@ -126,7 +126,7 @@ export default function WelcomeBanner() {
             className="text-sm sm:text-[15px] text-slate-200 leading-relaxed max-w-3xl"
             style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}
           >
-            PAIMANA tracks <strong className="text-amber-300 font-semibold">1,451+ historical construction bids</strong> and <strong className="text-amber-300 font-semibold">54 real Indian infrastructure projects</strong> sourced from MoSPI&apos;s public reporting, flagging cost overrun and schedule risk in real time.
+            PAIMANA tracks <strong className="text-amber-300 font-semibold">1,731 ongoing Indian infrastructure projects</strong> across 21 sectors sourced directly from MoSPI&apos;s national monitoring system, using machine learning and field telemetry to continuously diagnose schedule and cost distress in real time.
           </p>
 
           {/* Feature Highlights Pills */}

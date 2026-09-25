@@ -79,44 +79,23 @@ app.add_middleware(
 )
 
 # ── Feature config (must match train_model.py) ───────────────────────
-FEATURES = ["log_engineers_estimate", "bid_days", "item_count", "estimate_per_item",
-            "start_month", "is_monsoon_season", "materials_ppi", "ppi_deviation"]
-BID_ITEM_RE = re.compile(r"^\d+-\d+$")
-
-# HR_FEATURES: 13-feature list for the binary high-risk model.
-# Loaded at startup from models/hr_features.json (written by train_model.py).
-# Falls back to the hardcoded list if the file is missing.
-_HR_FEATURES_FALLBACK = FEATURES + [
-    "pct_earthwork", "pct_surfacing", "pct_structures",
-    "pct_drainage_traffic", "pct_other",
+BASE_FEATURES = [
+    "log_original_cost", "expenditure_ratio", "progress_frac", "burn_progress_gap",
+    "approval_to_start_months", "project_age_months", "start_month", "is_monsoon_start",
+    "sector_freq", "ministry_freq", "state_freq", "agency_freq"
 ]
+
 _hr_features_path = _resolve_file("models", "hr_features.json")
 try:
     with open(_hr_features_path, "r") as _f:
         HR_FEATURES = json.load(_f)
     print(f"Loaded HR_FEATURES ({len(HR_FEATURES)} features) from {_hr_features_path}")
 except Exception as _e:
-    HR_FEATURES = _HR_FEATURES_FALLBACK
+    HR_FEATURES = BASE_FEATURES
     print(f"hr_features.json not found ({_e}); using fallback HR_FEATURES ({len(HR_FEATURES)})")
 
-_PCT_GROUPS = ["earthwork", "surfacing", "structures", "drainage_traffic", "other"]
-
-
-def _section_group(col_name: str) -> str:
-    """Map a Caltrans bid-item pay-code column to a section group by leading number."""
-    try:
-        leading = int(col_name.split("-")[0])
-    except (ValueError, IndexError):
-        return "other"
-    if 200 <= leading <= 299:
-        return "earthwork"
-    elif 300 <= leading <= 399:
-        return "surfacing"
-    elif 400 <= leading <= 499:
-        return "structures"
-    elif 500 <= leading <= 699:
-        return "drainage_traffic"
-    return "other"
+FEATURES = HR_FEATURES
+_HR_FEATURES_FALLBACK = HR_FEATURES
 
 
 def _prob_to_tier(p: float) -> str:
@@ -172,70 +151,63 @@ def load_india_projects():
 
 @app.on_event("startup")
 def load_data_and_models():
-    global projects_df, cost_model, risk_model, feature_influence, india_projects_df
+    global projects_df, cost_model, risk_model, feature_influence, india_projects_df, FEATURES, HR_FEATURES
 
     # --- Load CSV ---
-    csv_path = _resolve_file("data", "ConstructionData.csv")
+    csv_path = _resolve_file("data", "india", "moSPI_paimana_all_ongoing_projects_Aug2026.csv")
     df = pd.read_csv(csv_path)
 
-    # --- Identify bid-item columns ---
-    bid_item_cols = [c for c in df.columns if BID_ITEM_RE.match(c)]
-    bid_items = df[bid_item_cols]
+    # --- Target Engineering (exact same as train_model.py) ---
+    target_date = pd.to_datetime(df["Target_DoC"], format="%m/%Y", errors="coerce")
+    has_revised = (df["Revised_DoC"] != "-") & df["Revised_DoC"].notna()
+    revised_clean = df["Revised_DoC"].replace("-", np.nan)
+    revised_date = pd.to_datetime(revised_clean, format="%m/%Y", errors="coerce")
 
-    # --- Feature engineering (same as train_model.py) ---
-    df["item_count"] = (bid_items.fillna(0) != 0).sum(axis=1)
-    df["total_quantity"] = bid_items.fillna(0).sum(axis=1)
-    df["log_engineers_estimate"] = np.log1p(df["engineers_estimate"])
-    df["estimate_per_item"] = df["engineers_estimate"] / (df["item_count"] + 1)
+    REF_YEAR = 2026
+    REF_MONTH = 8
 
-    # --- Parse start_date and derive date features ---
-    df = df.dropna(subset=["start_date"])
-    df["start_date_parsed"] = pd.to_datetime(
-        df["start_date"].astype(int).astype(str), format="%Y%m%d", errors="coerce"
-    )
-    df = df.dropna(subset=["start_date_parsed"])
-    df["start_month"] = df["start_date_parsed"].dt.month
-    df["is_monsoon_season"] = df["start_month"].isin([6, 7, 8, 9]).astype(int)
-    df["year_month"] = df["start_date_parsed"].dt.to_period("M")
+    rev_delay_months = (revised_date.dt.year - target_date.dt.year) * 12 + (revised_date.dt.month - target_date.dt.month)
+    overdue_months = (REF_YEAR - target_date.dt.year) * 12 + (REF_MONTH - target_date.dt.month)
 
-    # --- Load & merge FRED Construction PPI ---
-    ppi_path = _resolve_file("data", "construction_ppi.csv")
-    ppi = pd.read_csv(ppi_path)
-    ppi["observation_date"] = pd.to_datetime(ppi["observation_date"])
-    ppi["year_month"] = ppi["observation_date"].dt.to_period("M")
-    ppi = ppi[["year_month", "WPUSOP3000"]].rename(columns={"WPUSOP3000": "materials_ppi"})
-    df = df.merge(ppi, on="year_month", how="left")
-    LAST_PPI = 190.1  # Dec 2015, last available value
-    df["materials_ppi"] = df["materials_ppi"].fillna(LAST_PPI)
-    df["ppi_deviation"] = df["materials_ppi"] - df["materials_ppi"].mean()
-
-    # Drop rows with missing bid_days (same as training)
-    df = df.dropna(subset=["bid_days"])
-
-    # --- Section-group pct_* features (required by binary high-risk model) ---
-    # Re-identify bid_item_cols after row drops so indices are consistent.
-    bid_item_cols = [c for c in df.columns if BID_ITEM_RE.match(c)]
-    col_to_group = {c: _section_group(c) for c in bid_item_cols}
-    group_col_map = {
-        g: [c for c, grp in col_to_group.items() if grp == g]
-        for g in _PCT_GROUPS
-    }
-    bid_matrix = df[bid_item_cols].fillna(0)
-    row_totals = bid_matrix.sum(axis=1)
-    for g in _PCT_GROUPS:
-        cols = group_col_map[g]
-        group_sum = bid_matrix[cols].sum(axis=1) if cols else pd.Series(0, index=df.index)
-        df[f"pct_{g}"] = np.where(row_totals > 0, group_sum / row_totals, 0.0)
-
-    # Actual cost overrun
-    df["actual_cost_overrun_pct"] = (
-        (df["bid_total"] - df["engineers_estimate"]) / df["engineers_estimate"] * 100
+    raw_delay = np.where(
+        has_revised,
+        rev_delay_months,
+        np.where(overdue_months > 0, overdue_months, 0.0)
     )
 
-    # Clip to same 1st-99th percentile range used in training
-    lo = df["actual_cost_overrun_pct"].quantile(0.01)
-    hi = df["actual_cost_overrun_pct"].quantile(0.99)
-    df["actual_cost_overrun_pct"] = df["actual_cost_overrun_pct"].clip(lo, hi)
+    # Clip to 1st-99th percentile range (same as train_model.py)
+    lo = float(np.percentile(raw_delay, 1))
+    hi = float(np.percentile(raw_delay, 99))
+    df["delay_months"] = np.clip(raw_delay, lo, hi)
+
+    # --- Feature Engineering (exact same as train_model.py) ---
+    df["Approval_Date"] = df["Approval_Date"].fillna(df["Start_Date"])
+    approval_date = pd.to_datetime(df["Approval_Date"], format="%m/%Y", errors="coerce")
+    start_date = pd.to_datetime(df["Start_Date"], format="%m/%Y", errors="coerce")
+
+    df["log_original_cost"] = np.log1p(df["Original_Cost_Cr"])
+    df["expenditure_ratio"] = df["Cumulative_Expenditure_Cr"] / df["Original_Cost_Cr"]
+    df["progress_frac"] = df["Physical_Progress_Pct"] / 100.0
+    df["burn_progress_gap"] = df["expenditure_ratio"] - df["progress_frac"]
+    df["approval_to_start_months"] = (start_date.dt.year - approval_date.dt.year) * 12 + (start_date.dt.month - approval_date.dt.month)
+    df["project_age_months"] = (REF_YEAR - start_date.dt.year) * 12 + (REF_MONTH - start_date.dt.month)
+    df["start_month"] = start_date.dt.month
+    df["is_monsoon_start"] = df["start_month"].isin([6, 7, 8, 9]).astype(int)
+
+    # Frequency encoding
+    for col in ["Sector", "Ministry", "State", "Agency"]:
+        freq_col = f"{col.lower()}_freq"
+        df[freq_col] = df[col].map(df[col].value_counts(normalize=True))
+
+    # One-hot encode Sector and Ministry directly
+    sector_dummies = pd.get_dummies(df["Sector"], prefix="sector", dtype=int)
+    ministry_dummies = pd.get_dummies(df["Ministry"], prefix="ministry", dtype=int)
+    df = pd.concat([df, sector_dummies, ministry_dummies], axis=1)
+
+    # Ensure all HR_FEATURES columns exist
+    for f in HR_FEATURES:
+        if f not in df.columns:
+            df[f] = 0
 
     # --- Load models ---
     cost_model_path = _resolve_file("models", "cost_model.joblib")
@@ -243,24 +215,12 @@ def load_data_and_models():
     cost_model = joblib.load(cost_model_path)
     risk_model = joblib.load(risk_model_path)
 
-    print("=" * 60)
-    print(f"[DIAGNOSTIC] Loaded cost_model ({type(cost_model).__name__}):")
-    print(f"  cost_model expected features ({getattr(cost_model, 'n_features_in_', 'N/A')}): {list(getattr(cost_model, 'feature_names_in_', []))}")
-    print(f"[DIAGNOSTIC] Loaded risk_model ({type(risk_model).__name__}):")
-    print(f"  risk_model expected features ({getattr(risk_model, 'n_features_in_', 'N/A')}): {list(getattr(risk_model, 'feature_names_in_', []))}")
-    print("=" * 60)
-
     # --- Predictions ---
-    X = df[FEATURES]
-    print(f"[DIAGNOSTIC] Calling cost_model.predict(X):")
-    print(f"  Passed DataFrame columns ({len(X.columns)}): {list(X.columns)}")
-    df["predicted_overrun_pct"] = cost_model.predict(X)
+    X = df[HR_FEATURES]
+    df["predicted_delay_months"] = cost_model.predict(X)
 
     # Binary high-risk model: use predict_proba then bucket into Low/Medium/High
-    X_hr = df[HR_FEATURES]
-    print(f"[DIAGNOSTIC] Calling risk_model.predict_proba(X_hr):")
-    print(f"  Passed DataFrame columns ({len(X_hr.columns)}): {list(X_hr.columns)}")
-    hr_proba = risk_model.predict_proba(X_hr)[:, 1]
+    hr_proba = risk_model.predict_proba(X)[:, 1]
     df["high_risk_prob"] = hr_proba
     df["predicted_risk_tier"] = [_prob_to_tier(p) for p in hr_proba]
 
@@ -269,35 +229,54 @@ def load_data_and_models():
     df["project_id"] = df.index
 
     # --- Compute feature influence (works for both model types) ---
-    if isinstance(cost_model, LinearRegression):
-        # Use absolute coefficients, normalized to sum to 1
+    if hasattr(cost_model, "feature_importances_"):
+        feature_influence = {
+            feat: round(float(val), 4)
+            for feat, val in zip(HR_FEATURES, cost_model.feature_importances_)
+        }
+    elif hasattr(cost_model, "coef_"):
         raw = np.abs(cost_model.coef_)
         normed = raw / raw.sum() if raw.sum() > 0 else raw
         feature_influence = {
-            feat: round(float(val), 4) for feat, val in zip(FEATURES, normed)
+            feat: round(float(val), 4) for feat, val in zip(HR_FEATURES, normed)
         }
     else:
-        # RandomForest or similar with feature_importances_
-        feature_influence = {
-            feat: round(float(val), 4)
-            for feat, val in zip(FEATURES, cost_model.feature_importances_)
-        }
+        feature_influence = {}
 
-    # --- Keep only columns we need (drop the 8747 bid-item columns) ---
+    # Renamed / normalized fields
+    df["original_cost_cr"] = df["Original_Cost_Cr"]
+    df["cumulative_expenditure_cr"] = df["Cumulative_Expenditure_Cr"]
+    df["physical_progress_pct"] = df["Physical_Progress_Pct"]
+    df["project_name"] = df["Project_Name"]
+    df["ministry"] = df["Ministry"]
+    df["sector"] = df["Sector"]
+    df["state"] = df["State"]
+    df["agency"] = df["Agency"]
+
+    # Backward-compatible aliases for legacy frontend bindings
+    df["engineers_estimate"] = df["Original_Cost_Cr"]
+    df["bid_total"] = df["Cumulative_Expenditure_Cr"]
+    df["bid_days"] = df["delay_months"]
+    df["item_count"] = df["project_age_months"]
+    df["actual_cost_overrun_pct"] = df["delay_months"]
+    df["predicted_overrun_pct"] = df["predicted_delay_months"]
+    df["materials_ppi"] = df["burn_progress_gap"]
+
+    # --- Keep only columns we need ---
     keep_cols = [
-        "project_id", "engineers_estimate", "bid_total", "bid_days",
-        "item_count", "actual_cost_overrun_pct", "predicted_overrun_pct",
-        "predicted_risk_tier", "high_risk_prob",
-        # feature values for detail endpoint
-        "log_engineers_estimate", "estimate_per_item",
-        "start_month", "is_monsoon_season", "materials_ppi", "ppi_deviation",
-        # section-group pct_* features
-        "pct_earthwork", "pct_surfacing", "pct_structures",
-        "pct_drainage_traffic", "pct_other",
-    ]
+        "project_id", "project_name", "ministry", "sector", "state", "agency",
+        "original_cost_cr", "cumulative_expenditure_cr", "physical_progress_pct",
+        "delay_months", "predicted_delay_months", "predicted_risk_tier", "high_risk_prob",
+        # Legacy compatibility columns
+        "engineers_estimate", "bid_total", "bid_days", "item_count",
+        "actual_cost_overrun_pct", "predicted_overrun_pct", "materials_ppi",
+    ] + [f for f in HR_FEATURES if f not in [
+        "project_id", "original_cost_cr", "cumulative_expenditure_cr", "physical_progress_pct",
+        "delay_months", "predicted_delay_months", "predicted_risk_tier", "high_risk_prob"
+    ]]
     projects_df = df[keep_cols].copy()
 
-    print(f"Loaded {len(projects_df)} projects, models ready.")
+    print(f"Loaded {len(projects_df)} Indian infrastructure projects, models ready.")
     load_india_projects()
 
 
@@ -305,11 +284,14 @@ def load_data_and_models():
 
 @app.get("/projects")
 def list_projects(current_user: dict = Depends(require_verified_user)):
-    """All projects with key fields (no raw bid-item columns)."""
+    """All projects with key fields."""
     cols = [
-        "project_id", "engineers_estimate", "bid_total", "bid_days",
-        "item_count", "actual_cost_overrun_pct", "predicted_overrun_pct",
-        "predicted_risk_tier", "materials_ppi",
+        "project_id", "project_name", "ministry", "sector", "state", "agency",
+        "original_cost_cr", "cumulative_expenditure_cr", "physical_progress_pct",
+        "delay_months", "predicted_delay_months", "predicted_risk_tier",
+        # Legacy compatibility aliases
+        "engineers_estimate", "bid_total", "bid_days", "item_count",
+        "actual_cost_overrun_pct", "predicted_overrun_pct", "materials_ppi",
     ]
     return projects_df[cols].to_dict(orient="records")
 
@@ -328,7 +310,7 @@ def project_risk_detail(project_id: int, current_user: dict = Depends(require_ve
 
     # Add per-feature breakdown
     rec["feature_values"] = {
-        feat: round(float(rec.get(feat, 0)), 4) for feat in FEATURES
+        feat: round(float(rec.get(feat, 0)), 4) for feat in HR_FEATURES
     }
     influence_label = (
         "relative_influence (abs coef, normalized)"
@@ -343,40 +325,46 @@ def project_risk_detail(project_id: int, current_user: dict = Depends(require_ve
 
 @app.get("/alerts")
 def high_risk_alerts(current_user: dict = Depends(require_verified_user)):
-    """Projects predicted as High risk, sorted by predicted overrun descending."""
+    """Projects predicted as High risk, sorted by predicted delay descending."""
     high = projects_df[projects_df["predicted_risk_tier"] == "High"].copy()
-    high = high.sort_values("predicted_overrun_pct", ascending=False)
+    high = high.sort_values("predicted_delay_months", ascending=False)
     cols = [
-        "project_id", "engineers_estimate", "bid_total", "bid_days",
-        "item_count", "actual_cost_overrun_pct", "predicted_overrun_pct",
-        "predicted_risk_tier",
+        "project_id", "project_name", "ministry", "sector", "state",
+        "original_cost_cr", "cumulative_expenditure_cr", "physical_progress_pct",
+        "delay_months", "predicted_delay_months", "predicted_risk_tier",
+        # Legacy compatibility aliases
+        "engineers_estimate", "bid_total", "bid_days", "item_count",
+        "actual_cost_overrun_pct", "predicted_overrun_pct",
     ]
     return high[cols].to_dict(orient="records")
 
 
 @app.get("/dashboard/summary")
 def dashboard_summary(current_user: dict = Depends(require_verified_user)):
-    """Aggregate stats + hardcoded model performance from our training run."""
+    """Aggregate stats + real model performance from training run."""
     tier_counts = projects_df["predicted_risk_tier"].value_counts().to_dict()
+    avg_delay = round(float(projects_df["predicted_delay_months"].mean()), 2)
     return {
         "total_projects": len(projects_df),
-        "avg_predicted_overrun_pct": round(
-            float(projects_df["predicted_overrun_pct"].mean()), 2
-        ),
+        "avg_predicted_delay_months": avg_delay,
+        "avg_predicted_overrun_pct": avg_delay,
         "risk_tier_counts": {
             "Low": tier_counts.get("Low", 0),
             "Medium": tier_counts.get("Medium", 0),
             "High": tier_counts.get("High", 0),
         },
-        # Hardcoded from actual training output -- model transparency
+        # Real metrics from train_model.py run on MoSPI Indian Infrastructure data
         "model_performance": {
-            "baseline_test_r2": 0.1875,
-            "rf_test_r2": 0.2343,
-            "high_risk_recall": 0.70,
-            "high_risk_precision": 0.34,
-            "overall_accuracy": 0.5876,
-            "majority_baseline_accuracy": 0.7491,
-            "high_risk_base_rate": 0.25,
+            "baseline_test_r2": 0.5846,
+            "rf_test_r2": 0.7292,
+            "gb_test_r2": 0.7432,
+            "overall_accuracy": 0.9222,
+            "majority_baseline_accuracy": 0.7550,
+            "improvement_pp": 16.71,
+            "high_risk_precision": 0.8295,
+            "high_risk_recall": 0.8588,
+            "high_risk_f1": 0.8439,
+            "high_risk_base_rate": 0.2461,
         },
     }
 
@@ -397,31 +385,31 @@ def assistant_ask(request: AskRequest, current_user: dict = Depends(require_veri
     # --- Build data context from projects_df ---
     total = len(projects_df)
     tier_counts = projects_df["predicted_risk_tier"].value_counts().to_dict()
-    avg_overrun = round(float(projects_df["predicted_overrun_pct"].mean()), 2)
+    avg_delay = round(float(projects_df["predicted_delay_months"].mean()), 2)
 
     top5 = (
         projects_df
-        .sort_values("predicted_overrun_pct", ascending=False)
-        .head(5)[["project_id", "predicted_overrun_pct", "materials_ppi"]]
+        .sort_values("predicted_delay_months", ascending=False)
+        .head(5)[["project_id", "project_name", "predicted_delay_months", "original_cost_cr"]]
     )
     top5_lines = "\n".join(
-        f"  - Project #{int(r.project_id)}: "
-        f"predicted overrun {r.predicted_overrun_pct:.2f}%, "
-        f"materials PPI {r.materials_ppi:.1f}"
+        f"  - Project #{int(r.project_id)} ({r.project_name}): "
+        f"diagnosed slippage {r.predicted_delay_months:.1f} months, "
+        f"cost ₹{r.original_cost_cr:.1f} Cr"
         for _, r in top5.iterrows()
     )
 
     context = (
         f"Total projects: {total}\n"
-        f"Risk tier counts: Low={tier_counts.get('Low', 0)}, "
+        f"Distress tier counts: Low={tier_counts.get('Low', 0)}, "
         f"Medium={tier_counts.get('Medium', 0)}, "
         f"High={tier_counts.get('High', 0)}\n"
-        f"Average predicted cost overrun: {avg_overrun}%\n"
-        f"Correlation between materials_ppi and cost_overrun_pct: 0.38\n"
-        f"Top 5 highest-risk projects:\n{top5_lines}\n"
-        f"Key finding: The Materials Price Index (PPI) is a statistically "
-        f"significant predictor of construction bid cost overruns "
-        f"(correlation = 0.38)."
+        f"Average diagnosed schedule slippage: {avg_delay} months\n"
+        f"Top 5 most-distressed projects:\n{top5_lines}\n"
+        f"Key finding: this model diagnoses CURRENT distress in active projects "
+        f"using project age and burn-progress gap as the strongest signals — "
+        f"it identifies which ongoing projects are already showing signs of trouble, "
+        f"not which future projects will fail before they start."
     )
 
     prompt = (
@@ -503,6 +491,27 @@ def save_reports(reports: list):
 
 # ── India Risk Computation ─────────────────────────────────────────────
 
+REF_YEAR = 2026
+REF_MONTH = 8
+
+
+def calculate_project_age_months(start_date_str: Optional[str]) -> Optional[int]:
+    """Calculate project age in months from start_date (mm/YYYY) relative to reference date (August 2026).
+    Reuses the exact same calculation as train_model.py and load_data_and_models():
+        project_age_months = (REF_YEAR - start_date.year) * 12 + (REF_MONTH - start_date.month)
+    """
+    if not start_date_str or not str(start_date_str).strip() or str(start_date_str).strip() == "-":
+        return None
+    try:
+        parts = str(start_date_str).strip().split("/")
+        if len(parts) == 2:
+            s_month, s_year = int(parts[0]), int(parts[1])
+            return (REF_YEAR - s_year) * 12 + (REF_MONTH - s_month)
+    except (ValueError, TypeError):
+        pass
+    return None
+
+
 def compute_india_risk(project: dict, reports: Optional[list] = None) -> dict:
     """Compute risk flags and reasons for an Indian infrastructure project."""
     if reports is None:
@@ -524,23 +533,47 @@ def compute_india_risk(project: dict, reports: Optional[list] = None) -> dict:
         except (ValueError, TypeError):
             pass
 
-    # 2. Ongoing with physical progress < 20%
+    # 2. Ongoing with physical progress < 20% and running > 12 months
     status = str(project.get("status") or "").strip()
     prog = project.get("physical_progress_pct")
     if status == "Ongoing" and prog is not None:
         try:
             prog_val = float(prog)
             if prog_val < 20:
-                risk_reasons.append("Physical progress under 20%")
+                s_date = project.get("start_date") or project.get("approval_date")
+                age_m = calculate_project_age_months(s_date)
+                if age_m is not None and age_m > 12:
+                    risk_reasons.append("Physical progress under 20%")
         except (ValueError, TypeError):
             pass
 
-    # 3. Completed with delay_note
+    # 3. Schedule extension from target_doc to revised_doc
+    target_doc = project.get("target_doc")
+    revised_doc = project.get("revised_doc")
+    if target_doc and revised_doc:
+        try:
+            t_parts = str(target_doc).strip().split("/")
+            r_parts = str(revised_doc).strip().split("/")
+            if len(t_parts) == 2 and len(r_parts) == 2:
+                t_m = int(t_parts[1]) * 12 + int(t_parts[0])
+                r_m = int(r_parts[1]) * 12 + int(r_parts[0])
+                diff_m = r_m - t_m
+                if diff_m >= 12:
+                    risk_reasons.append(f"Schedule delayed by {diff_m} months (Target: {target_doc} -> Revised: {revised_doc})")
+        except Exception:
+            pass
+
+    # 4. Contractor operational delay
+    if project.get("is_delayed_by_contractor"):
+        r_text = project.get("contractor_delay_reason") or "Contractor reported operational delay"
+        risk_reasons.append(f"Contractor delay: {r_text}")
+
+    # 5. Completed with delay_note
     delay_note = project.get("delay_note")
     if status == "Completed" and delay_note and str(delay_note).strip():
         risk_reasons.append(str(delay_note).strip())
 
-    # 4. Field officer report with non-empty delay_reason
+    # 6. Field officer report with non-empty delay_reason
     proj_id_str = str(project.get("project_id"))
     matching_reports = [
         r for r in reports
@@ -565,7 +598,7 @@ def compute_india_risk(project: dict, reports: Optional[list] = None) -> dict:
 @app.get("/india/projects")
 def list_india_projects(
     status: Optional[str] = Query(None, description="Filter by exact status match"),
-    search: Optional[str] = Query(None, description="Case-insensitive substring match on project name"),
+    search: Optional[str] = Query(None, description="Case-insensitive substring match on project name, sector, ministry, state, or ID"),
 ):
     """Return list of India infrastructure projects with optional status and search filters."""
     global india_projects_df
@@ -581,10 +614,14 @@ def list_india_projects(
         if "status" in df.columns:
             df = df[df["status"] == status]
 
-    # Filter by case-insensitive substring match on project name
+    # Filter by case-insensitive substring match on project name, sector, ministry, state, or ID
     if search:
-        if "name" in df.columns:
-            df = df[df["name"].astype(str).str.contains(search, case=False, na=False)]
+        s = str(search).strip()
+        mask = pd.Series(False, index=df.index)
+        for col in ["name", "sector", "ministry", "state", "project_id"]:
+            if col in df.columns:
+                mask |= df[col].astype(str).str.contains(s, case=False, na=False)
+        df = df[mask]
 
     target_cols = [
         "project_id",
@@ -681,6 +718,10 @@ class CreateProjectRequest(BaseModel):
 
 class UpdateStatusRequest(BaseModel):
     status: str
+
+
+class UpdateRevisedCostRequest(BaseModel):
+    revised_cost_cr: float
 
 
 class AssignProjectRequest(BaseModel):
@@ -862,6 +903,53 @@ def update_india_project_status(
     return _project_to_response(projects_list[target_idx])
 
 
+@app.patch("/india/projects/{project_id}/revised-cost")
+def update_project_revised_cost(
+    project_id: str,
+    body: UpdateRevisedCostRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Update project revised cost in Cr.
+    Permitted only for 'admin' or the assigned 'contractor'.
+    """
+    user_role = current_user.get("role")
+    username = current_user.get("username")
+    user_id = str(current_user.get("id") or current_user.get("user_id") or "")
+
+    raw = _load_projects_file()
+    projects = raw.get("projects", [])
+    target = next((p for p in projects if str(p.get("project_id")) == str(project_id)), None)
+    if not target:
+        raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found.")
+
+    if user_role == "admin":
+        pass  # Admin is always authorized
+    elif user_role == "contractor":
+        assigned = str(target.get("assigned_contractor") or "")
+        if not assigned or (assigned != username and assigned != user_id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the assigned contractor or an administrator can update the revised cost for this project.",
+            )
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only contractors and administrators are authorized to update revised costs.",
+        )
+
+    if body.revised_cost_cr < 0:
+        raise HTTPException(status_code=400, detail="Revised cost must be a non-negative number.")
+
+    new_revised = round(float(body.revised_cost_cr), 2)
+    target["revised_cost_cr"] = new_revised
+    _save_projects_file(raw)
+    load_india_projects()
+
+    reports = load_reports()
+    return _project_to_response(target, reports=reports)
+
+
 @app.patch("/india/projects/{project_id}/assign")
 def assign_india_project(
     project_id: str,
@@ -902,7 +990,11 @@ def assign_india_project(
         if body.assigned_contractor is not None:
             fields_set.add("assigned_contractor")
 
+    users = load_users()
+    users_modified = False
+
     if "assigned_officer" in fields_set:
+        old_officer = target_project.get("assigned_officer")
         new_officer = body.assigned_officer or None
         if new_officer:
             officer_str = str(new_officer)
@@ -914,6 +1006,19 @@ def assign_india_project(
                             detail=f"Field officer '{officer_str}' is already assigned to active project '{p.get('name', p.get('project_id'))}'.",
                         )
         target_project["assigned_officer"] = new_officer
+
+        # Synchronize assigned_project_id and is_verified for officer in users.json
+        for u in users:
+            if u.get("role") in ("field_officer", "officer"):
+                uname = u.get("username")
+                uid = str(u.get("id", ""))
+                if new_officer and (uname == new_officer or uid == new_officer):
+                    u["assigned_project_id"] = str(project_id)
+                    u["is_verified"] = True
+                    users_modified = True
+                elif old_officer and (uname == old_officer or uid == old_officer) and str(u.get("assigned_project_id")) == str(project_id):
+                    u["assigned_project_id"] = None
+                    users_modified = True
 
     if "assigned_contractor" in fields_set:
         old_contractor = target_project.get("assigned_contractor")
@@ -929,21 +1034,21 @@ def assign_india_project(
                         )
         target_project["assigned_contractor"] = new_contractor
 
-        # Synchronize assigned_project_id in users.json for contractor accounts
-        users = load_users()
-        users_modified = False
+        # Synchronize assigned_project_id and is_verified for contractor in users.json
         for u in users:
             if u.get("role") == "contractor":
                 uname = u.get("username")
                 uid = str(u.get("id", ""))
                 if new_contractor and (uname == new_contractor or uid == new_contractor):
                     u["assigned_project_id"] = str(project_id)
+                    u["is_verified"] = True
                     users_modified = True
                 elif old_contractor and (uname == old_contractor or uid == old_contractor) and str(u.get("assigned_project_id")) == str(project_id):
                     u["assigned_project_id"] = None
                     users_modified = True
-        if users_modified:
-            save_users(users)
+
+    if users_modified:
+        save_users(users)
 
     raw["projects"] = projects_list
     _save_projects_file(raw)
@@ -957,7 +1062,7 @@ def assign_india_project(
 @app.get("/india/me/assigned-project")
 @app.get("/india/me/assigned-projects")
 def get_my_assigned_projects(
-    current_user: dict = Depends(require_verified_user),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Fetch the project(s) assigned to the current user (field officer or contractor).
@@ -977,7 +1082,7 @@ def get_my_assigned_projects(
         assigned_contractor = p.get("assigned_contractor")
         is_match = False
 
-        if role == "field_officer":
+        if role in ("field_officer", "officer"):
             if assigned_officer and (assigned_officer == username or assigned_officer == user_id):
                 is_match = True
         elif role == "contractor":
@@ -1403,6 +1508,45 @@ def save_feedback(feedback_list: list):
         json.dump(feedback_list, f, indent=2)
 
 
+def _format_feedback_item(f: dict) -> dict:
+    """Format feedback entry: public citizen feedback is strictly anonymous,
+    while feedback by contractors, field officers, and admins displays their role and name."""
+    raw_role = (f.get("role") or "public").strip().lower()
+    
+    # Public / Citizen feedback is strictly anonymous
+    if raw_role in ("public", "citizen", ""):
+        return {
+            "project_id": str(f.get("project_id")),
+            "timestamp": f.get("timestamp"),
+            "message": f.get("message"),
+            "category": f.get("category"),
+            "role": "public",
+            "author_role": "Citizen",
+            "author_name": "Anonymous Citizen",
+            "is_anonymous": True,
+        }
+    
+    # Official / Gated accounts: contractor, field_officer, admin
+    author = f.get("submitted_by") or "Official"
+    role_label_map = {
+        "contractor": "Contractor",
+        "field_officer": "Field Officer",
+        "officer": "Field Officer",
+        "admin": "Admin",
+    }
+    normalized_role = "field_officer" if raw_role == "officer" else raw_role
+    return {
+        "project_id": str(f.get("project_id")),
+        "timestamp": f.get("timestamp"),
+        "message": f.get("message"),
+        "category": f.get("category"),
+        "role": normalized_role,
+        "author_role": role_label_map.get(raw_role, raw_role.capitalize()),
+        "author_name": author,
+        "is_anonymous": False,
+    }
+
+
 @app.post("/india/projects/{project_id}/feedback")
 def submit_project_feedback(
     project_id: str,
@@ -1429,9 +1573,6 @@ def submit_project_feedback(
                 detail="You are not assigned to this project.",
             )
 
-    # Note: submitted_by and role are persisted to feedback.json for backend
-    # integrity and abuse-tracing only. They are NEVER exposed via API responses
-    # to keep citizen feedback anonymous.
     feedback_entry = {
         "project_id": str(project_id),
         "submitted_by": current_user.get("username"),
@@ -1444,20 +1585,15 @@ def submit_project_feedback(
     feedbacks.append(feedback_entry)
     save_feedback(feedbacks)
 
-    # Return anonymous response to client (omit submitted_by and role)
-    return {
-        "project_id": feedback_entry["project_id"],
-        "timestamp": feedback_entry["timestamp"],
-        "message": feedback_entry["message"],
-        "category": feedback_entry["category"],
-    }
+    return _format_feedback_item(feedback_entry)
 
 
 @app.get("/india/projects/{project_id}/feedback")
 def get_project_feedback(
     project_id: str,
 ):
-    """Return all feedback for that project_id from feedback.json, sorted newest first."""
+    """Return all feedback for that project_id from feedback.json, sorted newest first.
+    Citizen feedback is kept anonymous; contractor, officer, and admin feedback shows their role & name."""
     feedbacks = load_feedback()
     matching = [
         f for f in feedbacks
@@ -1465,18 +1601,7 @@ def get_project_feedback(
     ]
     matching.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
 
-    # Note: submitted_by and role are kept in the file for backend integrity
-    # and abuse-tracing only, but are stripped from API responses for all users
-    # (including admins) to keep citizen feedback fully anonymous.
-    return [
-        {
-            "project_id": str(f.get("project_id")),
-            "timestamp": f.get("timestamp"),
-            "message": f.get("message"),
-            "category": f.get("category"),
-        }
-        for f in matching
-    ]
+    return [_format_feedback_item(f) for f in matching]
 
 
 # ── India Project Followers & Following ────────────────────────────────
@@ -1603,32 +1728,170 @@ def get_india_notifications(
 ):
     """
     Role-based notifications:
-    - admin or field_officer: return flagged-projects data identical to /india/alerts
+    - admin: return nationwide flagged-projects data identical to /india/alerts
+    - field_officer / contractor: return alerts ONLY for project(s) assigned to them
+      (risk flags, contractor confirmation requests, rejection notices, recent updates)
     - public: reports from projects followed by current user, newest first, capped at 20
     Response shape: {role: str, count: int, items: [...]}
     """
     role = current_user.get("role", "public")
-    if role in ("admin", "field_officer"):
+    username = current_user.get("username")
+    user_id = str(current_user.get("id") or current_user.get("user_id") or "")
+
+    # 1. Admin retains nationwide overview of all flagged projects
+    if role == "admin":
         alert_items = get_india_alerts()
+        for a in alert_items:
+            if not a.get("summary") and a.get("risk_reasons"):
+                a["summary"] = "Flagged: " + ", ".join(a["risk_reasons"][:2])
+            a.setdefault("project_name", a.get("name"))
         return {
             "role": role,
             "count": len(alert_items),
             "items": alert_items,
         }
 
-    # Public role (or other non-admin/officer users)
+    raw = _load_projects_file()
+    projects_list = raw.get("projects", [])
+    all_reports = load_reports()
+    name_map = _get_india_project_name_map()
+
+    # 2. Field Officer & Contractor: strictly scoped to assigned projects only
+    if role in ("field_officer", "officer", "contractor"):
+        user_assigned_pid = str(current_user.get("assigned_project_id") or "")
+
+        assigned_pids = set()
+        if user_assigned_pid and user_assigned_pid not in ("None", "null", ""):
+            assigned_pids.add(user_assigned_pid)
+
+        for p in projects_list:
+            pid = str(p.get("project_id"))
+            assigned_officer = str(p.get("assigned_officer") or "")
+            assigned_contractor = str(p.get("assigned_contractor") or "")
+
+            if role in ("field_officer", "officer"):
+                if assigned_officer and (assigned_officer == username or assigned_officer == user_id):
+                    assigned_pids.add(pid)
+            elif role == "contractor":
+                if assigned_contractor and (assigned_contractor == username or assigned_contractor == user_id):
+                    assigned_pids.add(pid)
+
+        assigned_project_records = [
+            p for p in projects_list if str(p.get("project_id")) in assigned_pids
+        ]
+
+        items = []
+
+        for p in assigned_project_records:
+            pid = str(p.get("project_id"))
+            p_name = p.get("name") or name_map.get(pid, f"Project #{pid}")
+            sector = p.get("sector")
+            state = p.get("state")
+
+            proj_reports = [r for r in all_reports if str(r.get("project_id")) == pid]
+            proj_reports.sort(key=lambda x: str(x.get("timestamp") or ""), reverse=True)
+
+            action_report_ids = set()
+
+            # Priority 1: Actionable report notices
+            if role == "contractor":
+                for r in proj_reports:
+                    if r.get("status") == "pending_confirmation":
+                        action_report_ids.add(str(r.get("report_id")))
+                        exp_str = f"₹{r.get('expenditure_update_cr')} Cr" if r.get('expenditure_update_cr') is not None else ""
+                        items.append({
+                            "project_id": pid,
+                            "name": p_name,
+                            "project_name": p_name,
+                            "sector": sector,
+                            "state": state,
+                            "timestamp": r.get("timestamp"),
+                            "type": "pending_action",
+                            "action_required": True,
+                            "summary": f"Report #{r.get('report_id', '')}: Awaiting your confirmation {('(' + exp_str + ')') if exp_str else ''}",
+                        })
+            elif role in ("field_officer", "officer"):
+                for r in proj_reports:
+                    if r.get("status") == "rejected":
+                        action_report_ids.add(str(r.get("report_id")))
+                        note = r.get("contractor_note") or "Needs revision"
+                        items.append({
+                            "project_id": pid,
+                            "name": p_name,
+                            "project_name": p_name,
+                            "sector": sector,
+                            "state": state,
+                            "timestamp": r.get("timestamp"),
+                            "type": "rejected_report",
+                            "action_required": True,
+                            "summary": f"Report #{r.get('report_id', '')} rejected by contractor: {note}",
+                        })
+
+            # Priority 2: Risk Flag alert on assigned project
+            risk_info = compute_india_risk(p, reports=all_reports)
+            if risk_info.get("is_flagged"):
+                risk_reasons = risk_info.get("risk_reasons", [])
+                items.append({
+                    "project_id": pid,
+                    "name": p_name,
+                    "project_name": p_name,
+                    "sector": sector,
+                    "state": state,
+                    "timestamp": None,
+                    "type": "risk_flag",
+                    "risk_reasons": risk_reasons,
+                    "summary": "Assigned project flagged: " + ", ".join(risk_reasons),
+                    "is_flagged": True,
+                    "action_required": True,
+                })
+
+            # Priority 3: Recent report updates on assigned project (up to 5)
+            for r in proj_reports[:5]:
+                rid = str(r.get("report_id"))
+                if rid in action_report_ids:
+                    continue
+                exp_val = r.get("expenditure_update_cr")
+                delay = r.get("delay_reason")
+                status = r.get("status")
+
+                if exp_val is not None:
+                    summary = f"Report logged: ₹{exp_val} Cr expenditure"
+                else:
+                    summary = "Progress report logged"
+
+                if delay and str(delay).strip():
+                    summary += f", delay noted: {str(delay).strip()}"
+                elif status == "confirmed":
+                    summary += " (confirmed by contractor)"
+
+                items.append({
+                    "project_id": pid,
+                    "name": p_name,
+                    "project_name": p_name,
+                    "sector": sector,
+                    "state": state,
+                    "timestamp": r.get("timestamp"),
+                    "type": "report_update",
+                    "expenditure_update_cr": exp_val,
+                    "delay_reason": delay,
+                    "summary": summary,
+                })
+
+        return {
+            "role": role,
+            "count": len(items),
+            "items": items,
+        }
+
+    # 3. Public role (citizens following projects)
     followers = load_followers()
-    username = current_user.get("username")
     followed_pids = {
         str(pid)
         for pid, users in followers.items()
         if isinstance(users, list) and username in users
     }
 
-    all_reports = load_reports()
-    name_map = _get_india_project_name_map()
-
-    # 1. Followed projects risk status (persistent risk flags at top)
+    # Followed projects risk status (persistent risk flags at top)
     all_projects = list_india_projects(status=None, search=None)
     risk_flag_items = []
     for p in all_projects:
@@ -1640,13 +1903,17 @@ def get_india_notifications(
                 p_name = p.get("name") or name_map.get(pid, f"Project #{pid}")
                 risk_flag_items.append({
                     "project_id": pid,
+                    "name": p_name,
                     "project_name": p_name,
+                    "sector": p.get("sector"),
+                    "state": p.get("state"),
                     "timestamp": None,
                     "type": "risk_flag",
+                    "risk_reasons": risk_reasons,
                     "summary": "Currently flagged: " + ", ".join(risk_reasons),
                 })
 
-    # 2. Followed projects report-based updates, sorted by timestamp desc
+    # Followed projects report-based updates, sorted by timestamp desc
     matching_reports = [
         r for r in all_reports
         if str(r.get("project_id")) in followed_pids
@@ -1668,9 +1935,11 @@ def get_india_notifications(
         if delay and str(delay).strip():
             summary += f", delay: {str(delay).strip()}"
 
+        p_name = name_map.get(pid, f"Project #{pid}")
         report_items.append({
             "project_id": pid,
-            "project_name": name_map.get(pid, f"Project #{pid}"),
+            "name": p_name,
+            "project_name": p_name,
             "timestamp": r.get("timestamp"),
             "type": "report_update",
             "expenditure_update_cr": exp_val,
@@ -1688,157 +1957,189 @@ def get_india_notifications(
     }
 
 
+def _synthesize_india_response(question: str, all_projects: list, flagged: list, scored_matches: list) -> str:
+    """Fast, accurate deterministic intelligence generator for Indian infrastructure projects."""
+    q_lower = question.lower()
+
+    # 1. If user asks about a specific project (top match has a strong score)
+    if scored_matches and scored_matches[0][0] >= 10:
+        best_p = scored_matches[0][1]
+        name = best_p.get("name", "Unknown Project")
+        pid = best_p.get("project_id", "N/A")
+        cost = best_p.get("original_cost_cr")
+        spent = best_p.get("expenditure_cr")
+        prog = best_p.get("physical_progress_pct")
+        state = best_p.get("state") or "India"
+        ministry = best_p.get("ministry") or "Central Ministry"
+        agency = best_p.get("agency")
+        target_doc = best_p.get("target_doc") or "TBD"
+        revised_doc = best_p.get("revised_doc")
+        status = best_p.get("status") or "Ongoing"
+        officer = best_p.get("assigned_officer")
+        contractor = best_p.get("assigned_contractor")
+        reasons = best_p.get("risk_reasons", [])
+
+        cost_str = f"₹{cost:,.2f} Cr" if cost is not None else "N/A"
+        spent_str = f"₹{spent:,.2f} Cr" if spent is not None else "₹0.00 Cr"
+        prog_str = f"{prog:.1f}%" if prog is not None else "0.0%"
+        agency_str = f" (executed by {agency})" if agency else ""
+        doc_str = f"target completion of {target_doc}" + (f", revised to {revised_doc}" if revised_doc and revised_doc != target_doc and revised_doc != "-" else "")
+
+        risk_str = ""
+        if reasons:
+            risk_str = f" Flagged on the watch list due to: {'; '.join(reasons)}."
+        else:
+            risk_str = " Currently progressing without flagged risk alerts."
+
+        assignment_str = ""
+        if officer or contractor:
+            parts = []
+            if officer: parts.append(f"Officer: {officer}")
+            if contractor: parts.append(f"Contractor: {contractor}")
+            assignment_str = f" Assigned personnel: {', '.join(parts)}."
+
+        return (
+            f"**{name} (Project #{pid})** is an {status.lower()} infrastructure project in **{state}** "
+            f"under the **{ministry}**{agency_str}. It has an original capital outlay of **{cost_str}** "
+            f"with **{spent_str}** cumulative expenditure recorded. Physical progress stands at **{prog_str}** "
+            f"against a {doc_str}.{risk_str}{assignment_str}"
+        )
+
+    # 2. General / Aggregated Questions
+    if any(k in q_lower for k in ("flagged", "how many", "count", "risk", "at risk", "watchlist")):
+        reasons_tally = {}
+        for p in flagged:
+            for r in p.get("risk_reasons", []):
+                key = r.split(":")[0] if ":" in r else r
+                reasons_tally[key] = reasons_tally.get(key, 0) + 1
+        top_reasons = sorted(reasons_tally.items(), key=lambda x: x[1], reverse=True)[:3]
+        reasons_summary = ", ".join(f"{k} ({v} projects)" for k, v in top_reasons)
+
+        return (
+            f"Out of **{len(all_projects):,} total monitored projects**, **{len(flagged):,} projects** "
+            f"({len(flagged) / max(1, len(all_projects)) * 100:.1f}%) are currently flagged for risk review. "
+            f"The primary risk factors driving these flags are: {reasons_summary}."
+        )
+
+    if any(k in q_lower for k in ("cost", "escalat", "overrun", "worst", "expensive", "spend")):
+        escalated = [p for p in all_projects if (p.get("revised_cost_cr") or 0) > (p.get("original_cost_cr") or 0)]
+        escalated.sort(key=lambda p: (p.get("revised_cost_cr", 0) - p.get("original_cost_cr", 0)), reverse=True)
+        top3 = escalated[:3] if escalated else sorted(all_projects, key=lambda p: p.get("original_cost_cr", 0), reverse=True)[:3]
+        lines = [f"**{p.get('name')}** (₹{p.get('original_cost_cr', 0):,.1f} Cr)" for p in top3]
+        return (
+            f"Major capital outlay projects under active MoSPI monitoring include {'; '.join(lines)}. "
+            f"Cost overruns and expenditure velocity are actively tracked against physical progress milestones."
+        )
+
+    if any(k in q_lower for k in ("delay", "late", "schedule", "target", "timeline")):
+        return (
+            f"Schedule delays across the 1,731 monitored projects are tracked by comparing Target Date of Commissioning "
+            f"against Revised DoC and field progress. Projects with 12+ months schedule extension or physical progress "
+            f"under 20% are flagged automatically for officer review."
+        )
+
+    # 3. If multiple partial matches were found
+    if scored_matches:
+        names = [f"**{p.get('name')}** (#{p.get('project_id')})" for _, p in scored_matches[:3]]
+        return (
+            f"Found {len(scored_matches)} matching projects in the national database, including: {', '.join(names)}. "
+            f"Please specify a project name or ID for full cost, progress, and delay metrics."
+        )
+
+    return (
+        f"PAIMANA is currently monitoring **{len(all_projects):,} ongoing Indian infrastructure projects** "
+        f"across 21 sectors with **{len(flagged):,} flagged risk projects**. You can ask about any specific project "
+        f"by name (e.g. 'Bihta Civil Enclave', 'Kadapa Airport'), project ID, or state/sector."
+    )
+
+
 @app.post("/india/assistant/ask")
 def india_assistant_ask(
     request: AskRequest,
 ):
-    """Answer user questions about real Indian infrastructure projects using Gemini. Publicly accessible for guests and logged-in users."""
-    if not gemini_client:
-        return {
-            "answer": "I'm having trouble connecting right now. "
-                      "Try again in a moment."
-        }
-
+    """Answer user questions about real Indian infrastructure projects using fast targeted RAG with instant intelligence fallback."""
     try:
-        # ── Build context from live real India project data ────────────────────────
-        # 1. Fetch fresh list of all projects (loads real_projects.json & runs live compute_india_risk)
         all_projects = list_india_projects(status=None, search=None)
-        total_count = len(all_projects)
-
-        status_counts = {}
-        for p in all_projects:
-            s = p.get("status") or "Unknown"
-            status_counts[s] = status_counts.get(s, 0) + 1
-
-        status_line = ", ".join(
-            f"{k}={v}" for k, v in status_counts.items()
-        ) or "status breakdown unavailable"
-
-        # 2. Flagged projects — reuse live computed risk
         flagged = [p for p in all_projects if p.get("is_flagged")]
-        flagged.sort(key=lambda p: len(p.get("risk_reasons", [])), reverse=True)
-        top_flagged = flagged[:10]
 
-        # 3. Dynamically extract the top-2 cost-escalation examples from risk_reasons.
-        #    compute_india_risk produces strings like: "Cost escalated 142.7% above original estimate"
-        escalation_re = re.compile(r"Cost escalated ([\d.]+)%")
-        escalation_examples = []
-        for p in flagged:
-            name = p.get("name", f"Project #{p.get('project_id', '?')}")
-            for reason in p.get("risk_reasons", []):
-                m = escalation_re.search(reason)
-                if m:
-                    try:
-                        pct = float(m.group(1))
-                        escalation_examples.append((pct, name, reason))
-                    except ValueError:
-                        pass
+        q_lower = request.question.lower().strip()
+        words = [w for w in q_lower.split() if len(w) > 2 and w not in ('the', 'and', 'for', 'with', 'from', 'what', 'which', 'about', 'how', 'many', 'project', 'projects')]
 
-        escalation_examples.sort(key=lambda x: x[0], reverse=True)
-        top2 = escalation_examples[:2]
-
-        escalation_block = ""
-        if top2:
-            lines = [f"  - {name}: {reason}" for _, name, reason in top2]
-            escalation_block = (
-                "Most severe cost escalations in the dataset:\n"
-                + "\n".join(lines) + "\n"
-            )
-
-        # 4. Summary of flagged projects (name, sector, state, risk_reasons)
-        flagged_lines = []
-        for p in top_flagged:
-            name    = p.get("name",   f"Project #{p.get('project_id', '?')}")
-            sector  = p.get("sector", "unknown sector")
-            state   = p.get("state",  "unknown state")
-            reasons = "; ".join(p.get("risk_reasons", [])) or "no reasons recorded"
-            flagged_lines.append(f"  - {name} ({sector}, {state}): {reasons}")
-
-        flagged_block = (
-            f"Flagged / at-risk projects ({len(flagged)} total, top {len(top_flagged)} shown):\n"
-            + ("\n".join(flagged_lines) if flagged_lines else "  None flagged")
-            + "\n"
-        )
-
-        # 5. Full directory of all projects with live metadata, assignments, and costs
-        catalog_lines = []
+        # Targeted scoring of projects against the query
+        scored = []
         for p in all_projects:
-            pid = p.get("project_id", "?")
-            name = p.get("name", f"Project #{pid}")
-            status = p.get("status", "Unknown")
-            sector = p.get("sector") or "Unknown"
-            state = p.get("state") or "Unknown"
-            orig_cost = p.get("original_cost_cr")
-            rev_cost = p.get("revised_cost_cr")
-            exp = p.get("expenditure_cr")
-            prog = p.get("physical_progress_pct")
-            officer = p.get("assigned_officer") or "None"
-            contractor = p.get("assigned_contractor") or "None"
-            is_flg = "Flagged" if p.get("is_flagged") else "Normal"
-            reasons = "; ".join(p.get("risk_reasons", []))
+            score = 0
+            name = str(p.get("name", "")).lower()
+            state = str(p.get("state", "")).lower()
+            sector = str(p.get("sector", "")).lower()
+            agency = str(p.get("agency", "")).lower()
+            pid = str(p.get("project_id", "")).lower()
 
-            cost_parts = []
-            if orig_cost is not None:
-                cost_parts.append(f"Cost: ₹{orig_cost} Cr")
-            if rev_cost is not None and rev_cost != orig_cost:
-                cost_parts.append(f"Revised: ₹{rev_cost} Cr")
-            if exp is not None:
-                cost_parts.append(f"Spent: ₹{exp} Cr")
-            if prog is not None:
-                cost_parts.append(f"Progress: {prog}%")
-            cost_str = ", ".join(cost_parts) if cost_parts else "Cost: N/A"
+            if q_lower in name:
+                score += 35
+            for w in words:
+                if w in name:
+                    score += 8
+                if w in state or w in sector or w in agency:
+                    score += 3
+                if w == pid:
+                    score += 25
+            if score > 0:
+                scored.append((score, p))
 
-            item = (
-                f"  - [{pid}] \"{name}\" | Status: {status} | Sector: {sector} | State: {state} | "
-                f"{cost_str} | Officer: {officer} | Contractor: {contractor} | Risk: {is_flg}"
-            )
-            if reasons:
-                item += f" ({reasons})"
-            catalog_lines.append(item)
+        scored.sort(key=lambda x: x[0], reverse=True)
+        top_matches = scored[:5]
 
-        catalog_block = (
-            "Complete Monitored Projects Directory (live data):\n"
-            + "\n".join(catalog_lines)
-            + "\n"
-        )
-
-        context = (
-            f"Total Indian infrastructure projects monitored: {total_count}\n"
-            f"Status breakdown: {status_line}\n"
-            f"Total flagged projects: {len(flagged)}\n"
-            + escalation_block
-            + flagged_block
-            + "\n"
-            + catalog_block
-        )
-
-        prompt = (
-            "You are an assistant for PAIMANA's real Indian infrastructure project "
-            "monitoring platform. Answer the user's question accurately using the live project data "
-            "context provided below. Be concise (2-4 sentences), cite specific project names, status, "
-            "costs, progress, and assigned officer/contractor details where relevant. If the question "
-            "cannot be answered from this context, say so honestly.\n\n"
-            f"Context:\n{context}\n\n"
-            f"Question: {request.question}"
-        )
-
-        # ── Gemini call with model fallback ─────────────────────────────────────
-        models_to_try = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.5-flash", "gemini-3.6-flash"]
-        for model_name in models_to_try:
-            try:
-                response = gemini_client.models.generate_content(
-                    model=model_name,
-                    contents=prompt,
+        # If gemini client is available, attempt fast generate with concise targeted context
+        if gemini_client:
+            match_lines = []
+            for score, p in top_matches:
+                pid = p.get("project_id", "?")
+                pname = p.get("name")
+                cost = p.get("original_cost_cr")
+                spent = p.get("expenditure_cr")
+                prog = p.get("physical_progress_pct")
+                target_doc = p.get("target_doc", "N/A")
+                revised_doc = p.get("revised_doc", "N/A")
+                state = p.get("state", "India")
+                sector = p.get("sector", "Infrastructure")
+                agency = p.get("agency", "")
+                risk = "; ".join(p.get("risk_reasons", [])) or "None"
+                match_lines.append(
+                    f"- [{pid}] \"{pname}\" | State: {state} | Sector: {sector} | Agency: {agency} | Cost: ₹{cost} Cr | Spent: ₹{spent} Cr | Progress: {prog}% | Target: {target_doc} | Revised: {revised_doc} | Risk: {risk}"
                 )
-                return {"answer": response.text}
-            except Exception as e:
-                print(f"Gemini india-assistant ({model_name}) attempt failed: {e}")
-                time.sleep(0.3)
 
-        return {
-            "answer": "I'm having trouble connecting right now. "
-                      "Try again in a moment."
-        }
+            context_matches = "\n".join(match_lines) if match_lines else "No specific keyword matches found."
+
+            prompt = (
+                "You are an assistant for PAIMANA's real Indian infrastructure project monitoring platform. "
+                "Answer the user's question accurately using the live project data context provided below. "
+                "Be concise (2-4 sentences), cite specific project names, status, costs, progress, and dates where relevant. "
+                "If the project is found in the context, give its exact figures.\n\n"
+                f"Context:\n"
+                f"Total Indian infrastructure projects monitored: {len(all_projects)} (Flagged: {len(flagged)})\n"
+                f"Top relevant projects for this query:\n{context_matches}\n\n"
+                f"Question: {request.question}"
+            )
+
+            # Try gemini-3.6-flash first
+            for model_name in ["gemini-3.6-flash", "gemini-3.5-flash-lite"]:
+                try:
+                    response = gemini_client.models.generate_content(
+                        model=model_name,
+                        contents=prompt,
+                    )
+                    if response and response.text and response.text.strip():
+                        return {"answer": response.text.strip()}
+                except Exception as e:
+                    print(f"Gemini call to {model_name} failed: {e}")
+                    # If 503 or error, break directly to instant fallback instead of wasting user's time
+                    break
+
+        # Fallback: immediate deterministic synthesized answer
+        answer = _synthesize_india_response(request.question, all_projects, flagged, scored)
+        return {"answer": answer}
+
     except Exception as e:
         print(f"Error in india_assistant_ask: {e}")
         import traceback
@@ -1867,7 +2168,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends()):
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    is_verified = user.get("is_verified", True if user.get("role") != "contractor" else False)
+    is_verified = user.get("is_verified", True if user.get("role") not in ("contractor", "field_officer", "officer") else False)
     assigned_project_id = user.get("assigned_project_id", None)
     access_token_expires = timedelta(hours=24)
     access_token = create_access_token(
@@ -1893,7 +2194,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends()):
 def register(request: RegisterRequest):
     """
     Self-registration endpoint.
-    Accepts role 'public' (default, is_verified=True) or 'contractor' (is_verified=False).
+    Accepts role 'public' (is_verified=True), 'contractor' (is_verified=False), or 'field_officer' (is_verified=False).
     """
     username = request.username.strip()
     if not username or not request.password:
@@ -1903,10 +2204,13 @@ def register(request: RegisterRequest):
         )
 
     requested_role = (request.role or "public").strip().lower()
-    if requested_role not in ("public", "contractor"):
+    if requested_role in ("officer", "field_officer"):
+        requested_role = "field_officer"
+
+    if requested_role not in ("public", "contractor", "field_officer"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid role '{requested_role}'. Only 'public' and 'contractor' can self-register.",
+            detail=f"Invalid role '{requested_role}'. Only 'public', 'contractor', and 'field_officer' can self-register.",
         )
 
     existing = get_user(username)
@@ -1916,7 +2220,7 @@ def register(request: RegisterRequest):
             detail="Username already registered",
         )
 
-    is_verified = False if requested_role == "contractor" else True
+    is_verified = False if requested_role in ("contractor", "field_officer") else True
 
     new_user = {
         "id": username,
@@ -1933,11 +2237,12 @@ def register(request: RegisterRequest):
     users.append(new_user)
     save_users(users)
 
-    message = (
-        "Your account is pending admin approval. Once approved, an admin will assign you to a specific project — you'll only be able to see that project."
-        if requested_role == "contractor"
-        else "User registered successfully"
-    )
+    if requested_role == "contractor":
+        message = "Your contractor account is pending admin approval. Once approved, an admin will assign you to a specific project."
+    elif requested_role == "field_officer":
+        message = "Your field officer account is pending admin approval and assignment before field reporting access is enabled."
+    else:
+        message = "User registered successfully"
 
     return {
         "message": message,
@@ -1953,7 +2258,7 @@ def register(request: RegisterRequest):
 def get_me(current_user: dict = Depends(get_current_user)):
     """Return currently authenticated user profile (no password)."""
     user_role = current_user.get("role")
-    is_verified = current_user.get("is_verified", True if user_role != "contractor" else False)
+    is_verified = current_user.get("is_verified", True if user_role not in ("contractor", "field_officer", "officer") else False)
     return {
         "id": current_user.get("id", current_user["username"]),
         "username": current_user["username"],
@@ -1964,12 +2269,13 @@ def get_me(current_user: dict = Depends(get_current_user)):
     }
 
 
-# ── Admin Endpoints for Contractor Management ─────────────────────────
+# ── Admin Endpoints for Contractor & Officer Management ────────────────
 
 @app.get("/admin/pending-contractors")
-def get_pending_contractors(current_user: dict = Depends(require_role("admin"))):
+@app.get("/admin/pending-users")
+def get_pending_users(current_user: dict = Depends(require_role("admin"))):
     """
-    List all registered users with role='contractor' and is_verified=False.
+    List all registered users with role in ('contractor', 'field_officer') and is_verified=False.
     Admin-only endpoint.
     """
     users = load_users()
@@ -1985,16 +2291,17 @@ def get_pending_contractors(current_user: dict = Depends(require_role("admin")))
             "created_at": u.get("created_at"),
         }
         for u in users
-        if u.get("role") == "contractor" and not u.get("is_verified", False)
+        if u.get("role") in ("contractor", "field_officer", "officer") and not u.get("is_verified", False)
     ]
     return pending
 
 
 @app.patch("/admin/contractors/{user_id}/verify")
-def verify_contractor(user_id: str, current_user: dict = Depends(require_role("admin"))):
+@app.patch("/admin/users/{user_id}/verify")
+def verify_user_account(user_id: str, current_user: dict = Depends(require_role("admin"))):
     """
-    Verify a contractor account by setting is_verified=True.
-    Admin-only endpoint. Validates that the user exists and has role='contractor'.
+    Verify a user account (contractor or field officer) by setting is_verified=True.
+    Admin-only endpoint. Validates that user exists and requires verification.
     """
     users = load_users()
     target_user = None
@@ -2006,20 +2313,22 @@ def verify_contractor(user_id: str, current_user: dict = Depends(require_role("a
     if not target_user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Contractor '{user_id}' not found",
+            detail=f"User '{user_id}' not found",
         )
 
-    if target_user.get("role") != "contractor":
+    target_role = target_user.get("role", "")
+    if target_role not in ("contractor", "field_officer", "officer"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"User '{user_id}' is not a contractor",
+            detail=f"User '{user_id}' is role '{target_role}', which does not require approval.",
         )
 
     target_user["is_verified"] = True
     save_users(users)
 
+    role_display = "Field Officer" if target_role in ("field_officer", "officer") else "Contractor"
     return {
-        "message": f"Contractor '{target_user['username']}' verified successfully",
+        "message": f"{role_display} '{target_user['username']}' verified successfully",
         "id": target_user.get("id", target_user["username"]),
         "user_id": target_user.get("id", target_user["username"]),
         "username": target_user["username"],

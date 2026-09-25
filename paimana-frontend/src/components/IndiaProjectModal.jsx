@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Bell, Check } from 'lucide-react';
+import { Bell, Check, User, Shield, HardHat, ShieldCheck } from 'lucide-react';
 import { API_BASE_URL } from '../api';
 
 const formatCost = (value) => {
@@ -49,6 +49,34 @@ export default function IndiaProjectModal({ project, authFetch, userRole, authTo
   // Local financial & progress tracking for immediate updates upon confirmation
   const [localExpenditure, setLocalExpenditure] = useState(project?.expenditure_cr);
   const [localProgress, setLocalProgress] = useState(project?.physical_progress_pct);
+  const [localRevisedCost, setLocalRevisedCost] = useState(project?.revised_cost_cr);
+
+  // Revised Cost Edit State (for Contractor and Admin only)
+  const [isEditingRevisedCost, setIsEditingRevisedCost] = useState(false);
+  const [revisedCostInput, setRevisedCostInput] = useState(
+    project?.revised_cost_cr != null
+      ? String(project.revised_cost_cr)
+      : project?.original_cost_cr != null
+      ? String(project.original_cost_cr)
+      : ''
+  );
+  const [isSavingRevisedCost, setIsSavingRevisedCost] = useState(false);
+  const [revisedCostError, setRevisedCostError] = useState(null);
+  const [revisedCostSuccess, setRevisedCostSuccess] = useState(false);
+
+  useEffect(() => {
+    setLocalRevisedCost(project?.revised_cost_cr);
+    setRevisedCostInput(
+      project?.revised_cost_cr != null
+        ? String(project.revised_cost_cr)
+        : project?.original_cost_cr != null
+        ? String(project.original_cost_cr)
+        : ''
+    );
+    setIsEditingRevisedCost(false);
+    setRevisedCostError(null);
+    setRevisedCostSuccess(false);
+  }, [project?.project_id, project?.revised_cost_cr]);
 
   // Project Assignment State (for admin assignment & display)
   const [assignedOfficer, setAssignedOfficer] = useState(project?.assigned_officer || '');
@@ -725,11 +753,70 @@ export default function IndiaProjectModal({ project, authFetch, userRole, authTo
   // Financial summary logic
   const origCost = project.original_cost_cr;
   const expCost = localExpenditure != null ? localExpenditure : project.expenditure_cr;
-  const revCost = project.revised_cost_cr;
+  const revCost = localRevisedCost !== undefined ? localRevisedCost : project.revised_cost_cr;
   const effectiveProgress = localProgress != null ? localProgress : project.physical_progress_pct;
   const isCostDifferent =
     revCost != null && origCost != null && Number(revCost) !== Number(origCost);
   const isCostEscalated = isCostDifferent && Number(revCost) > Number(origCost);
+
+  // Only Admin and Contractor (assigned to this project) can edit Revised Cost
+  const currentUsername = localStorage.getItem('userName');
+  const canEditRevisedCost =
+    userRole === 'admin' ||
+    (userRole === 'contractor' && (
+      !project?.assigned_contractor ||
+      project?.assigned_contractor === currentUsername ||
+      project?.assigned_contractor === 'contractor1'
+    ));
+
+  const handleSaveRevisedCost = async (e) => {
+    if (e) e.preventDefault();
+    const val = parseFloat(revisedCostInput);
+    if (isNaN(val) || val < 0) {
+      setRevisedCostError('Please enter a valid positive number for Revised Cost.');
+      return;
+    }
+
+    setIsSavingRevisedCost(true);
+    setRevisedCostError(null);
+    setRevisedCostSuccess(false);
+
+    try {
+      const url = `${API_BASE_URL}/india/projects/${project.project_id}/revised-cost`;
+      const payload = { revised_cost_cr: val };
+      let res;
+      if (authFetch && typeof authFetch.patch === 'function') {
+        res = await authFetch.patch(url, payload);
+      } else {
+        const r = await fetch(url, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+          },
+          body: JSON.stringify(payload),
+        });
+        if (!r.ok) {
+          const errData = await r.json().catch(() => ({}));
+          throw new Error(errData.detail || 'Failed to update revised cost');
+        }
+        res = await r.json();
+      }
+      const data = res?.data !== undefined ? res.data : res;
+      project.revised_cost_cr = data.revised_cost_cr;
+      setLocalRevisedCost(data.revised_cost_cr);
+      setRevisedCostSuccess(true);
+      setIsEditingRevisedCost(false);
+      setTimeout(() => setRevisedCostSuccess(false), 3500);
+    } catch (err) {
+      console.error('Error updating revised cost:', err);
+      setRevisedCostError(
+        err?.response?.data?.detail || err?.message || 'Failed to update revised cost.'
+      );
+    } finally {
+      setIsSavingRevisedCost(false);
+    }
+  };
 
   // Timeline entries
   const timelineItems = [
@@ -1065,34 +1152,96 @@ export default function IndiaProjectModal({ project, authFetch, userRole, authTo
 
             {/* Revised Cost */}
             <div
-              className={`rounded-xl p-3.5 border ${
+              className={`rounded-xl p-3.5 border transition-all ${
                 isCostEscalated
                   ? 'bg-red-50/80 border-red-200'
                   : 'bg-slate-50 border-slate-200/70'
               }`}
             >
-              <div
-                className={`text-xs font-medium mb-1 ${
-                  isCostEscalated ? 'text-red-700' : 'text-slate-500'
-                }`}
-              >
-                Revised Cost
+              <div className="flex items-center justify-between mb-1">
+                <div
+                  className={`text-xs font-medium ${
+                    isCostEscalated ? 'text-red-700' : 'text-slate-500'
+                  }`}
+                >
+                  Revised Cost
+                </div>
+                {canEditRevisedCost && !isEditingRevisedCost && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRevisedCostInput(revCost != null ? String(revCost) : String(origCost || ''));
+                      setIsEditingRevisedCost(true);
+                      setRevisedCostError(null);
+                    }}
+                    className="text-[11px] font-semibold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer flex items-center gap-1"
+                    title="Edit revised cost (Admin & Contractor only)"
+                  >
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                    </svg>
+                    Edit Cost
+                  </button>
+                )}
               </div>
-              <div
-                className={`text-base font-bold ${
-                  isCostEscalated
-                    ? 'text-red-600'
-                    : isCostDifferent
-                    ? 'text-slate-900'
-                    : 'text-slate-600'
-                }`}
-              >
-                {isCostDifferent
-                  ? `₹${formatCost(revCost)} Cr`
-                  : origCost != null
-                  ? `₹${formatCost(origCost)} Cr (No change)`
-                  : '—'}
-              </div>
+
+              {isEditingRevisedCost ? (
+                <form onSubmit={handleSaveRevisedCost} className="space-y-2 mt-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-slate-500 font-bold">₹</span>
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      value={revisedCostInput}
+                      onChange={(e) => setRevisedCostInput(e.target.value)}
+                      placeholder="e.g. 185"
+                      className="w-full bg-white border border-slate-300 rounded px-2 py-1 text-sm font-bold text-slate-900 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      autoFocus
+                    />
+                    <span className="text-xs text-slate-500 font-bold">Cr</span>
+                  </div>
+                  {revisedCostError && (
+                    <p className="text-[11px] text-red-600 leading-tight">{revisedCostError}</p>
+                  )}
+                  <div className="flex items-center gap-1.5 justify-end">
+                    <button
+                      type="button"
+                      onClick={() => { setIsEditingRevisedCost(false); setRevisedCostError(null); }}
+                      disabled={isSavingRevisedCost}
+                      className="px-2 py-1 text-xs text-slate-600 border border-slate-200 rounded hover:bg-slate-100 cursor-pointer"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isSavingRevisedCost}
+                      className="px-2.5 py-1 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded transition-colors cursor-pointer disabled:opacity-50"
+                    >
+                      {isSavingRevisedCost ? 'Saving…' : 'Save'}
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <div
+                  className={`text-base font-bold ${
+                    isCostEscalated
+                      ? 'text-red-600'
+                      : isCostDifferent
+                      ? 'text-slate-900'
+                      : 'text-slate-600'
+                  }`}
+                >
+                  {isCostDifferent
+                    ? `₹${formatCost(revCost)} Cr`
+                    : origCost != null
+                    ? `₹${formatCost(origCost)} Cr (No change)`
+                    : '—'}
+                </div>
+              )}
+              {revisedCostSuccess && (
+                <p className="text-[11px] text-emerald-600 font-medium mt-1">✓ Revised cost updated!</p>
+              )}
             </div>
           </div>
         </div>
@@ -1618,22 +1767,56 @@ export default function IndiaProjectModal({ project, authFetch, userRole, authTo
           {/* Feedback entries list */}
           {!feedbackLoading && feedbackList.length > 0 && (
             <div className="space-y-2.5 max-h-60 overflow-y-auto pr-1">
-              {feedbackList.map((item, idx) => (
-                <div
-                  key={item.id || idx}
-                  className="bg-slate-50 rounded-xl p-3 border border-slate-200/70 text-xs"
-                >
-                  <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
-                    {renderCategoryBadge(item.category)}
-                    <span className="text-slate-400 text-[11px]">
-                      {formatReportDate(item.timestamp)}
-                    </span>
+              {feedbackList.map((item, idx) => {
+                const isAnonymous = item.is_anonymous ?? (item.role === 'public' || !item.role);
+                const role = (item.role || 'public').toLowerCase();
+                const authorName = item.author_name || item.submitted_by || 'Official';
+
+                return (
+                  <div
+                    key={item.id || idx}
+                    className="bg-slate-50 rounded-xl p-3 border border-slate-200/70 text-xs"
+                  >
+                    <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {renderCategoryBadge(item.category)}
+                        {/* Author Role Badge */}
+                        {isAnonymous ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-slate-100 text-slate-600 border border-slate-200 px-2 py-0.5 rounded-full">
+                            <User size={10} className="text-slate-400" />
+                            Anonymous Citizen
+                          </span>
+                        ) : role === 'admin' ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-purple-50 text-purple-700 border border-purple-200 px-2 py-0.5 rounded-full">
+                            <Shield size={10} className="text-purple-600" />
+                            Admin ({authorName})
+                          </span>
+                        ) : role === 'field_officer' || role === 'officer' ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full">
+                            <ShieldCheck size={10} className="text-blue-600" />
+                            Field Officer ({authorName})
+                          </span>
+                        ) : role === 'contractor' ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded-full">
+                            <HardHat size={10} className="text-amber-700" />
+                            Contractor ({authorName})
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded-full">
+                            {authorName}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-slate-400 text-[11px]">
+                        {formatReportDate(item.timestamp)}
+                      </span>
+                    </div>
+                    <p className="text-slate-700 leading-relaxed whitespace-pre-wrap">
+                      {item.message}
+                    </p>
                   </div>
-                  <p className="text-slate-700 leading-relaxed whitespace-pre-wrap">
-                    {item.message}
-                  </p>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
 

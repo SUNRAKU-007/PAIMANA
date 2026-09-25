@@ -4,10 +4,10 @@ import api, { API_BASE_URL } from "../api";
 
 // ── Per-endpoint copy ─────────────────────────────────────────────────────────
 const BIDS_CONFIG = {
-  welcome: "Hi! Ask me about project risks, cost overruns, or trends in this dataset.",
+  welcome: "Hi! Ask me about project distress signals, schedule slippage, or trends in this dataset.",
   chips: [
-    "What's driving high risk projects?",
-    "How many projects are high risk?",
+    "What's driving projects into distress?",
+    "How many projects are currently in distress?",
     "Does materials pricing matter?",
   ],
 };

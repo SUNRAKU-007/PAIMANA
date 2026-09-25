@@ -47,18 +47,28 @@ function PieLabel({ cx, cy, midAngle, innerRadius, outerRadius, percent }) {
 function ScatterTooltip({ active, payload }) {
   if (!active || !payload?.length) return null;
   const d = payload[0].payload;
+  const cost = d.plotCost ?? d.original_cost_cr ?? d.engineers_estimate;
+  const delay = d.plotDelay ?? d.predicted_delay_months ?? d.predicted_overrun_pct;
   return (
-    <div className="bg-white rounded-lg shadow-md border border-slate-200 px-3 py-2 text-sm">
+    <div className="bg-white rounded-lg shadow-md border border-slate-200 px-3 py-2 text-sm max-w-xs">
       <p className="font-semibold text-slate-800">
         Project #{d.project_id ?? "—"}
       </p>
+      {d.project_name && (
+        <p className="text-xs text-slate-500 truncate mb-1" title={d.project_name}>
+          {d.project_name}
+        </p>
+      )}
       <p className="text-slate-600">
-        PPI: <span className="font-medium">{d.materials_ppi?.toFixed(1)}</span>
+        Original Cost:{" "}
+        <span className="font-medium">
+          {cost != null ? `₹${Number(cost).toLocaleString("en-IN", { maximumFractionDigits: 1 })} Cr` : "—"}
+        </span>
       </p>
       <p className="text-slate-600">
-        Overrun:{" "}
+        Schedule Slippage:{" "}
         <span className="font-medium">
-          {d.predicted_overrun_pct?.toFixed(2)}%
+          {delay != null ? `${Number(delay) > 0 ? "+" : ""}${Number(delay).toFixed(1)} mo` : "—"}
         </span>
       </p>
       <p className="text-slate-600">
@@ -78,8 +88,8 @@ function ScatterTooltip({ active, payload }) {
 /**
  * ChartsPanel — two side-by-side analytics cards.
  * @param {{ riskCounts: { Low: number, Medium: number, High: number },
- *           projects: Array<{ materials_ppi: number,
- *                             predicted_overrun_pct: number,
+ *           projects: Array<{ original_cost_cr?: number,
+ *                             predicted_delay_months?: number,
  *                             predicted_risk_tier: string,
  *                             project_id?: number }> }} props
  */
@@ -95,7 +105,11 @@ export default function ChartsPanel({ riskCounts, projects }) {
   (projects ?? []).forEach((p) => {
     const tier = p.predicted_risk_tier ?? "Low";
     if (!scatterByTier[tier]) scatterByTier[tier] = [];
-    scatterByTier[tier].push(p);
+    scatterByTier[tier].push({
+      ...p,
+      plotCost: Number(p.original_cost_cr ?? p.engineers_estimate ?? p.materials_ppi ?? 0),
+      plotDelay: Number(p.predicted_delay_months ?? p.predicted_overrun_pct ?? 0),
+    });
   });
 
   return (
@@ -153,13 +167,13 @@ export default function ChartsPanel({ riskCounts, projects }) {
         </ResponsiveContainer>
       </div>
 
-      {/* ── Right card: Scatter — PPI vs Overrun ────────────────────── */}
+      {/* ── Right card: Scatter — Cost vs Predicted Delay ─────────────── */}
       <div className="bg-white rounded-xl shadow-sm p-6">
         <h3 className="text-lg font-semibold text-slate-900 mb-1">
-          Materials Price Index vs Predicted Overrun
+          Project Cost vs Current Schedule Slippage
         </h3>
         <p className="text-xs text-slate-400 mb-4">
-          Demonstrates that materials pricing predicts cost overrun
+          Project scale (₹ Cr) vs diagnosed schedule slippage (months)
         </p>
 
         <ResponsiveContainer width="100%" height={320}>
@@ -167,13 +181,13 @@ export default function ChartsPanel({ riskCounts, projects }) {
             <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
             <XAxis
               type="number"
-              dataKey="materials_ppi"
-              name="Materials PPI"
+              dataKey="plotCost"
+              name="Cost (₹ Cr)"
               tick={{ fontSize: 12 }}
               stroke="#94a3b8"
             >
               <Label
-                value="Materials PPI"
+                value="Original Cost (₹ Cr)"
                 position="bottom"
                 offset={6}
                 style={{ fill: "#64748b", fontSize: 13, fontWeight: 500 }}
@@ -181,13 +195,13 @@ export default function ChartsPanel({ riskCounts, projects }) {
             </XAxis>
             <YAxis
               type="number"
-              dataKey="predicted_overrun_pct"
-              name="Predicted Overrun %"
+              dataKey="plotDelay"
+              name="Schedule Slippage (Months)"
               tick={{ fontSize: 12 }}
               stroke="#94a3b8"
             >
               <Label
-                value="Predicted Overrun %"
+                value="Schedule Slippage (Months)"
                 angle={-90}
                 position="insideLeft"
                 offset={4}

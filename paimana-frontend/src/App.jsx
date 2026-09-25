@@ -410,13 +410,13 @@ function App() {
               ...(authToken && userRole === 'public'
                 ? [{ id: 'my-projects', label: 'My Projects', Icon: Bookmark }]
                 : []),
-              // Contractor Approvals: only logged-in admin users
+              // Account Approvals: only logged-in admin users
               ...(authToken && userRole === 'admin'
                 ? [{
                     id: 'contractor-approvals',
-                    label: 'Contractor Approvals',
+                    label: 'Account Approvals',
                     Icon: UserCheck,
-                    caption: 'Review & verify contractor accounts',
+                    caption: 'Review & verify contractor & field officer accounts',
                   }]
                 : []),
               // Model Lab: only logged-in users
@@ -425,7 +425,7 @@ function App() {
                     id: 'model-lab',
                     label: 'Model Validation Lab',
                     Icon: FlaskConical,
-                    caption: 'ML proof-of-concept on real construction bid data',
+                    caption: 'AI-powered distress diagnostics across 1,731 ongoing Indian infrastructure projects',
                   }]
                 : []),
             ].map(({ id, label, Icon, caption }) => {
@@ -555,13 +555,13 @@ function App() {
               <ContractorApprovals authFetch={api} />
             )}
 
-            {/* Model Validation Lab â€” logged-in only */}
+            {/* Model Validation Lab ── logged-in only */}
             {activeSection === 'model-lab' && authToken && (
               <>
                 <div className="mb-8">
                   <h2 className="font-semibold text-lg text-slate-700">Model Validation Lab</h2>
                   <p className="text-sm text-slate-500 mt-0.5">
-                    Proof-of-concept: does materials pricing predict cost overrun better than conventional fields?
+                    Portfolio Health Diagnostics: identifying which active projects are currently showing signs of schedule distress, using real MoSPI data across 1,731 ongoing projects.
                   </p>
                 </div>
                 {loading && (

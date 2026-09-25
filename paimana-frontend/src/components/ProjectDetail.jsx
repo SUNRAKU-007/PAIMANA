@@ -3,6 +3,19 @@ import { X } from "lucide-react";
 
 // ── Human-readable feature labels ───────────────────────────────────────
 const FEATURE_LABELS = {
+  original_cost_cr: "Original Cost (₹ Cr)",
+  cumulative_expenditure_cr: "Cumulative Spend (₹ Cr)",
+  expenditure_ratio: "Expenditure Ratio",
+  log_original_cost: "Log Original Cost",
+  log_expenditure: "Log Cumulative Spend",
+  planned_duration_months: "Planned Duration (Months)",
+  project_age_months: "Project Age (Months)",
+  burn_rate_cr_per_month: "Burn Rate (₹ Cr/Month)",
+  cost_progress_ratio: "Cost-to-Progress Ratio",
+  burn_progress_gap: "Burn vs Progress Gap",
+  physical_progress_pct: "Physical Progress (%)",
+  start_year: "Start Year",
+  // Legacy mappings fallback
   materials_ppi: "Materials Price Index",
   log_engineers_estimate: "Project Size (log)",
   estimate_per_item: "Cost per Bid Item",
@@ -20,12 +33,24 @@ const TIER_STYLE = {
   High: "bg-red-100 text-red-700",
 };
 
-// ── Currency formatter ──────────────────────────────────────────────────
-const usd = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  maximumFractionDigits: 0,
-});
+function fmtCrores(n) {
+  if (n == null || isNaN(Number(n))) return "—";
+  return `₹${Number(n).toLocaleString("en-IN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} Cr`;
+}
+
+function getFeatureLabel(key) {
+  if (FEATURE_LABELS[key]) return FEATURE_LABELS[key];
+  if (key.startsWith("sec_")) {
+    return `Sector: ${key.slice(4).replace(/_/g, " ")}`;
+  }
+  if (key.startsWith("min_")) {
+    return `Ministry: ${key.slice(4).replace(/_/g, " ")}`;
+  }
+  return key.replace(/_/g, " ");
+}
 
 /**
  * ProjectDetail — right-side slide-in drawer showing a single project's
@@ -62,7 +87,7 @@ export default function ProjectDetail({ projectId, project, isLoading, onClose }
 
       {/* ── Drawer ──────────────────────────────────────────────────── */}
       <aside
-        className={`fixed top-0 right-0 z-50 h-full w-full sm:w-96
+        className={`fixed top-0 right-0 z-50 h-full w-full sm:w-[420px]
                     bg-white shadow-2xl flex flex-col
                     transition-transform duration-300 ease-in-out
                     ${isOpen ? "translate-x-0" : "translate-x-full"}`}
@@ -72,6 +97,7 @@ export default function ProjectDetail({ projectId, project, isLoading, onClose }
             {/* Header is always shown immediately */}
             <DrawerHeader
               projectId={projectId}
+              project={project}
               tier={project?.predicted_risk_tier}
               onClose={onClose}
             />
@@ -88,28 +114,40 @@ export default function ProjectDetail({ projectId, project, isLoading, onClose }
 }
 
 // ── Header (renders immediately with just the project ID) ───────────────
-function DrawerHeader({ projectId, tier, onClose }) {
+function DrawerHeader({ projectId, project, tier, onClose }) {
   return (
-    <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
-      <div className="flex items-center gap-3 min-w-0">
-        <h2 className="text-lg font-semibold text-slate-900 truncate">
-          Project #{projectId}
-        </h2>
-        {tier && (
-          <span
-            className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold shrink-0 ${TIER_STYLE[tier]}`}
-          >
-            {tier}
-          </span>
-        )}
+    <div className="border-b border-slate-100 px-6 py-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3 min-w-0">
+          <h2 className="text-lg font-bold text-slate-900 truncate">
+            Project #{projectId}
+          </h2>
+          {tier && (
+            <span
+              className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold shrink-0 ${TIER_STYLE[tier]}`}
+            >
+              {tier} Distress
+            </span>
+          )}
+        </div>
+        <button
+          onClick={onClose}
+          className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
+          aria-label="Close"
+        >
+          <X className="w-5 h-5" />
+        </button>
       </div>
-      <button
-        onClick={onClose}
-        className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
-        aria-label="Close"
-      >
-        <X className="w-5 h-5" />
-      </button>
+      {project?.project_name && (
+        <p className="text-xs text-slate-600 font-medium mt-1 line-clamp-2">
+          {project.project_name}
+        </p>
+      )}
+      {(project?.ministry || project?.sector || project?.state) && (
+        <p className="text-[11px] text-slate-400 mt-1">
+          {[project.sector, project.state, project.ministry].filter(Boolean).join(" • ")}
+        </p>
+      )}
     </div>
   );
 }
@@ -119,15 +157,15 @@ function SkeletonBody() {
   return (
     <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6 animate-pulse">
       {/* Metric cards skeleton */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-3 gap-3">
         <div className="h-16 rounded-lg bg-slate-200" />
         <div className="h-16 rounded-lg bg-slate-200" />
         <div className="h-16 rounded-lg bg-slate-200" />
       </div>
-      {/* Overrun callout skeleton */}
+      {/* Overrun/delay callout skeleton */}
       <div className="h-24 rounded-xl bg-slate-200" />
       {/* Extra stats skeleton */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-2 gap-3">
         <div className="h-16 rounded-lg bg-slate-200" />
         <div className="h-16 rounded-lg bg-slate-200" />
       </div>
@@ -151,13 +189,12 @@ function SkeletonBody() {
 // ── Full body content (rendered once data has loaded) ────────────────────
 function DrawerBody({ project }) {
   const p = project;
-  const tier = p.predicted_risk_tier ?? "Low";
-  const overrun = p.predicted_overrun_pct;
-  const actual = p.actual_cost_overrun_pct;
+  const delayMonths = p.predicted_delay_months ?? p.predicted_overrun_pct;
+  const actualDelay = p.delay_months ?? p.actual_cost_overrun_pct;
 
   // ── Feature influence sorted desc ───────────────────────────────────
   const influences = Object.entries(p.feature_influence ?? {})
-    .map(([key, value]) => ({ key, label: FEATURE_LABELS[key] ?? key, value }))
+    .map(([key, value]) => ({ key, label: getFeatureLabel(key), value }))
     .sort((a, b) => b.value - a.value);
 
   const maxInfluence = influences.length > 0 ? influences[0].value : 1;
@@ -165,44 +202,86 @@ function DrawerBody({ project }) {
   return (
     <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
       {/* ── Key metrics ─────────────────────────────────────────── */}
-      <div className="grid grid-cols-3 gap-4">
-        <MetricCard label="Engineer's Estimate" value={usd.format(p.engineers_estimate)} />
-        <MetricCard label="Bid Total" value={usd.format(p.bid_total)} />
-        <MetricCard label="Bid Days" value={p.bid_days != null ? `${Math.round(p.bid_days)} days` : "—"} />
+      <div className="grid grid-cols-3 gap-3">
+        <MetricCard
+          label="Original Cost"
+          value={fmtCrores(p.original_cost_cr ?? p.engineers_estimate)}
+        />
+        <MetricCard
+          label="Cumulative Spend"
+          value={fmtCrores(p.cumulative_expenditure_cr ?? p.bid_total)}
+        />
+        <MetricCard
+          label="Physical Progress"
+          value={
+            p.physical_progress_pct != null
+              ? `${Number(p.physical_progress_pct).toFixed(1)}%`
+              : (p.bid_days != null ? `${Math.round(p.bid_days)} days` : "—")
+          }
+        />
       </div>
 
-      {/* ── Predicted overrun callout ────────────────────────────── */}
+      {/* ── Predicted delay callout ────────────────────────────── */}
       <div className="rounded-xl bg-slate-50 p-5">
         <p className="text-sm font-medium text-slate-500 mb-1">
-          Predicted Overrun
+          Diagnosed Schedule Slippage
         </p>
         <p
           className={`text-3xl font-bold tracking-tight ${
-            overrun >= 5 ? "text-red-600" : overrun <= -2 ? "text-green-600" : "text-slate-900"
+            Number(delayMonths) >= 12
+              ? "text-red-600"
+              : Number(delayMonths) <= 0
+              ? "text-green-600"
+              : "text-amber-600"
           }`}
         >
-          {overrun >= 0 ? "+" : ""}
-          {overrun?.toFixed(2)}%
+          {Number(delayMonths) > 0 ? "+" : ""}
+          {Number(delayMonths).toFixed(1)} months
         </p>
-        {actual != null && (
-          <p className="text-sm text-slate-400 mt-1">
-            Actual:{" "}
-            <span className="font-medium text-slate-600">
-              {actual >= 0 ? "+" : ""}
-              {actual.toFixed(2)}%
+        {actualDelay != null && (
+          <p className="text-sm text-slate-500 mt-1.5">
+            Actual Delay Recorded:{" "}
+            <span className="font-semibold text-slate-700">
+              {Number(actualDelay) > 0 ? "+" : ""}
+              {Number(actualDelay).toFixed(1)} months
             </span>
           </p>
         )}
       </div>
 
       {/* ── Extra stats ─────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-4">
-        <MetricCard label="Item Count" value={p.item_count} />
+      <div className="grid grid-cols-2 gap-3">
         <MetricCard
-          label="Cost per Item"
+          label="Project Age"
           value={
-            p.feature_values?.estimate_per_item != null
-              ? usd.format(p.feature_values.estimate_per_item)
+            p.feature_values?.project_age_months != null
+              ? `${Math.round(p.feature_values.project_age_months)} months`
+              : (p.item_count != null ? `${p.item_count} items` : "—")
+          }
+        />
+        <MetricCard
+          label="Planned Duration"
+          value={
+            p.feature_values?.planned_duration_months != null
+              ? `${Math.round(p.feature_values.planned_duration_months)} months`
+              : (p.feature_values?.estimate_per_item != null
+                  ? fmtCrores(p.feature_values.estimate_per_item)
+                  : "—")
+          }
+        />
+        <MetricCard
+          label="Monthly Burn Rate"
+          value={
+            p.feature_values?.burn_rate_cr_per_month != null
+              ? `₹${Number(p.feature_values.burn_rate_cr_per_month).toFixed(2)} Cr/mo`
+              : "—"
+          }
+        />
+        <MetricCard
+          label="Burn vs Progress Gap"
+          value={
+            p.feature_values?.burn_progress_gap != null
+              ? `${Number(p.feature_values.burn_progress_gap).toFixed(1)}`
               : "—"
           }
         />
@@ -210,18 +289,18 @@ function DrawerBody({ project }) {
 
       {/* ── Feature influence ────────────────────────────────────── */}
       <div>
-        <h3 className="text-sm font-semibold text-slate-700 mb-3">
-          Why this prediction?
+        <h3 className="text-sm font-semibold text-slate-700 mb-1">
+          Why this diagnosis?
         </h3>
         <p className="text-xs text-slate-400 mb-4">
-          Relative influence of each feature on the cost-overrun model
+          Relative influence of each signal on this project&apos;s distress score
         </p>
 
         <div className="space-y-3">
-          {influences.map(({ key, label, value }) => (
+          {influences.slice(0, 10).map(({ key, label, value }) => (
             <div key={key}>
               <div className="flex items-center justify-between mb-1">
-                <span className="text-xs font-medium text-slate-600">
+                <span className="text-xs font-medium text-slate-600 truncate max-w-[240px]" title={label}>
                   {label}
                 </span>
                 <span className="text-xs text-slate-400">

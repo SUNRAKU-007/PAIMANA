@@ -203,27 +203,29 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
 
 
 def require_verified_user(current_user: dict = Depends(get_current_user)) -> dict:
-    """FastAPI dependency that blocks unverified contractors from accessing gated resources."""
+    """FastAPI dependency that blocks unverified contractors or field officers from accessing gated resources."""
     user_role = current_user.get("role")
-    is_verified = current_user.get("is_verified", True if user_role != "contractor" else False)
-    if user_role == "contractor" and not is_verified:
+    is_verified = current_user.get("is_verified", True if user_role not in ("contractor", "field_officer", "officer") else False)
+    if user_role in ("contractor", "field_officer", "officer") and not is_verified:
+        type_str = "field officer" if user_role in ("field_officer", "officer") else "contractor"
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Your contractor account is pending admin approval",
+            detail=f"Your {type_str} account is pending admin approval",
         )
     return current_user
 
 
 def require_role(*allowed_roles: str):
     """Dependency factory that wraps get_current_user and raises 403 if role not in allowed_roles,
-    or if an unverified contractor attempts access."""
+    or if an unverified user attempts access."""
     def role_checker(current_user: dict = Depends(get_current_user)) -> dict:
         user_role = current_user.get("role")
-        is_verified = current_user.get("is_verified", True if user_role != "contractor" else False)
-        if user_role == "contractor" and not is_verified:
+        is_verified = current_user.get("is_verified", True if user_role not in ("contractor", "field_officer", "officer") else False)
+        if user_role in ("contractor", "field_officer", "officer") and not is_verified:
+            type_str = "field officer" if user_role in ("field_officer", "officer") else "contractor"
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Your contractor account is pending admin approval",
+                detail=f"Your {type_str} account is pending admin approval",
             )
         if user_role not in allowed_roles:
             raise HTTPException(
