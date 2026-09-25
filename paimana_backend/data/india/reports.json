@@ -203,5 +203,19 @@
     "status": "confirmed",
     "confirmed_at": "2026-09-25T04:13:12.883983+00:00",
     "confirmed_by": "contractor1"
+  },
+  {
+    "id": "d2e3a476",
+    "report_id": "d2e3a476",
+    "project_id": "900000",
+    "submitted_by": "officer1",
+    "timestamp": "2026-09-25T04:41:17.332909+00:00",
+    "expenditure_update_cr": 36.0,
+    "progress_pct": 14.0,
+    "delay_reason": null,
+    "notes": "Officer weekly progress update",
+    "status": "confirmed",
+    "confirmed_at": "2026-09-25T04:41:17.408828+00:00",
+    "confirmed_by": "contractor1"
   }
 ]

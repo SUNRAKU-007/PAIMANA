@@ -1,34 +1,36 @@
 import { useState, useRef, useEffect } from "react";
 import { MessageCircle, X, Send } from "lucide-react";
-import api from "../api";
+import api, { API_BASE_URL } from "../api";
 
 // ── Per-endpoint copy ─────────────────────────────────────────────────────────
-const ENDPOINT_CONFIG = {
-  "http://127.0.0.1:8000/assistant/ask": {
-    welcome: "Hi! Ask me about project risks, cost overruns, or trends in this dataset.",
-    chips: [
-      "What's driving high risk projects?",
-      "How many projects are high risk?",
-      "Does materials pricing matter?",
-    ],
-  },
-  "http://127.0.0.1:8000/india/assistant/ask": {
-    welcome: "Ask me about real Indian infrastructure projects, flagged risks, or delays.",
-    chips: [
-      "Which projects have the worst cost overruns?",
-      "What's causing delays?",
-      "How many projects are flagged?",
-    ],
-  },
+const BIDS_CONFIG = {
+  welcome: "Hi! Ask me about project risks, cost overruns, or trends in this dataset.",
+  chips: [
+    "What's driving high risk projects?",
+    "How many projects are high risk?",
+    "Does materials pricing matter?",
+  ],
+};
+
+const INDIA_CONFIG = {
+  welcome: "Ask me about real Indian infrastructure projects, flagged risks, or delays.",
+  chips: [
+    "Which projects have the worst cost overruns?",
+    "What's causing delays?",
+    "How many projects are flagged?",
+  ],
 };
 
 function getConfig(endpoint) {
-  return ENDPOINT_CONFIG[endpoint] ?? ENDPOINT_CONFIG["http://127.0.0.1:8000/assistant/ask"];
+  if (endpoint && endpoint.includes("india")) {
+    return INDIA_CONFIG;
+  }
+  return BIDS_CONFIG;
 }
 
 export default function AssistantChat({
   isDrawerOpen = false,
-  endpoint = "http://127.0.0.1:8000/assistant/ask",
+  endpoint = `${API_BASE_URL}/assistant/ask`,
 }) {
   const [isOpen, setIsOpen]       = useState(false);
   const [messages, setMessages]   = useState([]);

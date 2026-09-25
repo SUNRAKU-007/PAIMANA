@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { PlusCircle, X } from 'lucide-react';
 import IndiaProjectModal from './IndiaProjectModal';
+import { API_BASE_URL } from '../api';
 
 const STATUS_TABS = ['All', 'Ongoing', 'Completed', 'Terminated', 'Newly Added'];
 
@@ -46,7 +47,7 @@ function AddProjectModal({ authFetch, onSuccess, onClose }) {
     if (form.delay_note)      payload.delay_note      = form.delay_note.trim();
 
     try {
-      const url = 'http://127.0.0.1:8000/india/projects';
+      const url = `${API_BASE_URL}/india/projects`;
       let result;
       if (authFetch && typeof authFetch.post === 'function') {
         const res = await authFetch.post(url, payload);
@@ -237,7 +238,7 @@ export default function IndiaProjectsView({
 
     let fetchPromise;
     if (isAssignedRole) {
-      const url = 'http://127.0.0.1:8000/india/me/assigned-project';
+      const url = `${API_BASE_URL}/india/me/assigned-project`;
       fetchPromise = authFetch && typeof authFetch.get === 'function'
         ? authFetch.get(url)
         : fetch(url, { headers: authToken ? { Authorization: `Bearer ${authToken}` } : {} }).then((r) => r.json());
@@ -251,8 +252,8 @@ export default function IndiaProjectsView({
       }
 
       fetchPromise = authFetch && typeof authFetch.get === 'function'
-        ? authFetch.get('http://127.0.0.1:8000/india/projects', { params })
-        : fetch(`http://127.0.0.1:8000/india/projects?${new URLSearchParams(params)}`).then((r) => r.json());
+        ? authFetch.get(`${API_BASE_URL}/india/projects`, { params })
+        : fetch(`${API_BASE_URL}/india/projects?${new URLSearchParams(params)}`).then((r) => r.json());
     }
 
     fetchPromise

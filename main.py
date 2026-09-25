@@ -56,9 +56,22 @@ def _resolve_file(*paths):
 # ── App setup ──────────────────────────────────────────────────────────
 app = FastAPI(title="Construction Bid Risk API")
 
+# Allowed CORS origins (configurable via ALLOWED_ORIGINS env var for deployment)
+_default_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+_env_origins = os.environ.get("ALLOWED_ORIGINS", "").strip()
+if _env_origins:
+    allowed_origins = [orig.strip() for orig in _env_origins.split(",") if orig.strip()]
+else:
+    allowed_origins = _default_origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -230,12 +243,23 @@ def load_data_and_models():
     cost_model = joblib.load(cost_model_path)
     risk_model = joblib.load(risk_model_path)
 
+    print("=" * 60)
+    print(f"[DIAGNOSTIC] Loaded cost_model ({type(cost_model).__name__}):")
+    print(f"  cost_model expected features ({getattr(cost_model, 'n_features_in_', 'N/A')}): {list(getattr(cost_model, 'feature_names_in_', []))}")
+    print(f"[DIAGNOSTIC] Loaded risk_model ({type(risk_model).__name__}):")
+    print(f"  risk_model expected features ({getattr(risk_model, 'n_features_in_', 'N/A')}): {list(getattr(risk_model, 'feature_names_in_', []))}")
+    print("=" * 60)
+
     # --- Predictions ---
     X = df[FEATURES]
+    print(f"[DIAGNOSTIC] Calling cost_model.predict(X):")
+    print(f"  Passed DataFrame columns ({len(X.columns)}): {list(X.columns)}")
     df["predicted_overrun_pct"] = cost_model.predict(X)
 
     # Binary high-risk model: use predict_proba then bucket into Low/Medium/High
     X_hr = df[HR_FEATURES]
+    print(f"[DIAGNOSTIC] Calling risk_model.predict_proba(X_hr):")
+    print(f"  Passed DataFrame columns ({len(X_hr.columns)}): {list(X_hr.columns)}")
     hr_proba = risk_model.predict_proba(X_hr)[:, 1]
     df["high_risk_prob"] = hr_proba
     df["predicted_risk_tier"] = [_prob_to_tier(p) for p in hr_proba]

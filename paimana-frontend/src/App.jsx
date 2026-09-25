@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Building2, FlaskConical, Menu, Bookmark, LogIn, UserCheck, Clock, RefreshCw } from 'lucide-react'
-import api, { setOnUnauthorizedCallback } from './api'
+import api, { setOnUnauthorizedCallback, API_BASE_URL } from './api'
 import Login from './components/Login'
 import KpiCards from './components/KpiCards'
 import ChartsPanel from './components/ChartsPanel'
@@ -141,7 +141,7 @@ function App() {
       })
       .catch((err) => {
         if (err.response?.status !== 401) {
-          setError('Could not load dashboard. Is the backend running on port 8000?')
+          setError('Could not load dashboard. Is the backend running?')
         }
       })
       .finally(() => setLoading(false))
@@ -610,8 +610,8 @@ function App() {
         isDrawerOpen={selectedProjectId != null}
         endpoint={
           activeSection === 'model-lab'
-            ? 'http://127.0.0.1:8000/assistant/ask'
-            : 'http://127.0.0.1:8000/india/assistant/ask'
+            ? `${API_BASE_URL}/assistant/ask`
+            : `${API_BASE_URL}/india/assistant/ask`
         }
       />
     </>

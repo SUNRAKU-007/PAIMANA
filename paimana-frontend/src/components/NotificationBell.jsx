@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Bell, CheckCircle } from 'lucide-react';
+import { API_BASE_URL } from '../api';
 
 export default function NotificationBell({ authFetch, userRole, onProjectClick }) {
   const [data, setData] = useState({
@@ -11,7 +12,7 @@ export default function NotificationBell({ authFetch, userRole, onProjectClick }
   const dropdownRef = useRef(null);
 
   const fetchNotifications = () => {
-    const url = 'http://127.0.0.1:8000/india/notifications';
+    const url = `${API_BASE_URL}/india/notifications`;
     const fetchPromise =
       authFetch && typeof authFetch.get === 'function'
         ? authFetch.get(url)

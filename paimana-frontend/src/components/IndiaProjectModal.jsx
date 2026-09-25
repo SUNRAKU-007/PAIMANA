@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Bell, Check } from 'lucide-react';
+import { API_BASE_URL } from '../api';
 
 const formatCost = (value) => {
   if (value == null || value === '') return '—';
@@ -73,7 +74,7 @@ export default function IndiaProjectModal({ project, authFetch, userRole, authTo
     }
 
     let isMounted = true;
-    const url = 'http://127.0.0.1:8000/india/me/following';
+    const url = `${API_BASE_URL}/india/me/following`;
     const fetchPromise =
       authFetch && typeof authFetch.get === 'function'
         ? authFetch.get(url)
@@ -130,7 +131,7 @@ export default function IndiaProjectModal({ project, authFetch, userRole, authTo
   // Load assignable officers & verified contractors for admin, filtering out busy users on other active projects
   useEffect(() => {
     if (userRole === 'admin' && project?.project_id) {
-      const url = `http://127.0.0.1:8000/admin/assignable-users?project_id=${project.project_id}`;
+      const url = `${API_BASE_URL}/admin/assignable-users?project_id=${project.project_id}`;
       const fetchPromise =
         authFetch && typeof authFetch.get === 'function'
           ? authFetch.get(url)
@@ -166,7 +167,7 @@ export default function IndiaProjectModal({ project, authFetch, userRole, authTo
     };
 
     try {
-      const url = `http://127.0.0.1:8000/india/projects/${project.project_id}/assign`;
+      const url = `${API_BASE_URL}/india/projects/${project.project_id}/assign`;
       let res;
       if (authFetch && typeof authFetch.patch === 'function') {
         res = await authFetch.patch(url, payload);
@@ -207,7 +208,7 @@ export default function IndiaProjectModal({ project, authFetch, userRole, authTo
     if (!project || !project.project_id || isFollowingLoading) return;
     setIsFollowingLoading(true);
 
-    const url = `http://127.0.0.1:8000/india/projects/${project.project_id}/follow`;
+    const url = `${API_BASE_URL}/india/projects/${project.project_id}/follow`;
     try {
       let res;
       if (authFetch && typeof authFetch.post === 'function') {
@@ -262,7 +263,7 @@ export default function IndiaProjectModal({ project, authFetch, userRole, authTo
     setReportsLoading(true);
     setReportsError(null);
 
-    const url = `http://127.0.0.1:8000/india/projects/${project.project_id}/reports`;
+    const url = `${API_BASE_URL}/india/projects/${project.project_id}/reports`;
     const fetchPromise =
       authFetch && typeof authFetch.get === 'function'
         ? authFetch.get(url)
@@ -301,7 +302,7 @@ export default function IndiaProjectModal({ project, authFetch, userRole, authTo
     setFeedbackLoading(true);
     setFeedbackError(null);
 
-    const url = `http://127.0.0.1:8000/india/projects/${project.project_id}/feedback`;
+    const url = `${API_BASE_URL}/india/projects/${project.project_id}/feedback`;
     const fetchPromise =
       authFetch && typeof authFetch.get === 'function'
         ? authFetch.get(url)
@@ -342,7 +343,7 @@ export default function IndiaProjectModal({ project, authFetch, userRole, authTo
     setStatusUpdateError(null);
 
     try {
-      const url = `http://127.0.0.1:8000/india/projects/${project.project_id}/status`;
+      const url = `${API_BASE_URL}/india/projects/${project.project_id}/status`;
       const payload = { status: newStatus };
       if (authFetch && typeof authFetch.patch === 'function') {
         await authFetch.patch(url, payload);
@@ -402,7 +403,7 @@ export default function IndiaProjectModal({ project, authFetch, userRole, authTo
     };
 
     try {
-      const url = `http://127.0.0.1:8000/india/projects/${project.project_id}/report`;
+      const url = `${API_BASE_URL}/india/projects/${project.project_id}/report`;
       let newReport;
 
       if (authFetch && typeof authFetch.post === 'function') {
@@ -456,7 +457,7 @@ export default function IndiaProjectModal({ project, authFetch, userRole, authTo
     setReportActionError(null);
 
     try {
-      const url = `http://127.0.0.1:8000/india/projects/${project.project_id}/reports/${reportId}/confirm`;
+      const url = `${API_BASE_URL}/india/projects/${project.project_id}/reports/${reportId}/confirm`;
       let updatedReport;
       if (authFetch && typeof authFetch.patch === 'function') {
         const res = await authFetch.patch(url, {});
@@ -518,7 +519,7 @@ export default function IndiaProjectModal({ project, authFetch, userRole, authTo
     setReportActionError(null);
 
     try {
-      const url = `http://127.0.0.1:8000/india/projects/${project.project_id}/reports/${reportId}/reject`;
+      const url = `${API_BASE_URL}/india/projects/${project.project_id}/reports/${reportId}/reject`;
       const payload = { reason: trimmedReason };
       let updatedReport;
       if (authFetch && typeof authFetch.patch === 'function') {
@@ -574,7 +575,7 @@ export default function IndiaProjectModal({ project, authFetch, userRole, authTo
     const payload = { reason: delayFlagNote.trim() || null };
 
     try {
-      const url = `http://127.0.0.1:8000/india/projects/${project.project_id}/flag-delay`;
+      const url = `${API_BASE_URL}/india/projects/${project.project_id}/flag-delay`;
       if (authFetch && typeof authFetch.patch === 'function') {
         await authFetch.patch(url, payload);
       } else {
@@ -620,7 +621,7 @@ export default function IndiaProjectModal({ project, authFetch, userRole, authTo
     };
 
     try {
-      const url = `http://127.0.0.1:8000/india/projects/${project.project_id}/feedback`;
+      const url = `${API_BASE_URL}/india/projects/${project.project_id}/feedback`;
       let newEntry;
 
       if (authFetch && typeof authFetch.post === 'function') {

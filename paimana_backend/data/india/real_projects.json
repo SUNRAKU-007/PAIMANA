@@ -996,9 +996,9 @@
       "assigned_contractor": "contractor1",
       "physical_progress_pct": 14.0,
       "is_delayed_by_contractor": true,
-      "contractor_delay_timestamp": "2026-09-25T04:13:12.848271+00:00",
+      "contractor_delay_timestamp": "2026-09-25T04:41:17.353743+00:00",
       "contractor_delay_reason": "Monsoon rain delayed cement delivery",
-      "delay_note": "Contractor delay: Monsoon rain delayed cement delivery | Contractor delay: Monsoon rain delayed cement delivery"
+      "delay_note": "Contractor delay: Monsoon rain delayed cement delivery | Contractor delay: Monsoon rain delayed cement delivery | Contractor delay: Monsoon rain delayed cement delivery"
     },
     {
       "project_id": "900001",

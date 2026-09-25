@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Bookmark, BookmarkCheck, AlertTriangle } from 'lucide-react';
 import IndiaProjectModal from './IndiaProjectModal';
+import { API_BASE_URL } from '../api';
 
 const formatCost = (value) => {
   if (value == null || value === '') return '—';
@@ -44,8 +45,8 @@ export default function MyFollowing({
     setLoading(true);
     setError(null);
 
-    const followingUrl = 'http://127.0.0.1:8000/india/me/following';
-    const projectsUrl = 'http://127.0.0.1:8000/india/projects';
+    const followingUrl = `${API_BASE_URL}/india/me/following`;
+    const projectsUrl = `${API_BASE_URL}/india/projects`;
 
     const fetchFollowing =
       authFetch && typeof authFetch.get === 'function'
@@ -107,7 +108,7 @@ export default function MyFollowing({
     const pidStr = String(projectId);
     setUnfollowingId(pidStr);
 
-    const url = `http://127.0.0.1:8000/india/projects/${pidStr}/follow`;
+    const url = `${API_BASE_URL}/india/projects/${pidStr}/follow`;
     try {
       if (authFetch && typeof authFetch.post === 'function') {
         await authFetch.post(url);

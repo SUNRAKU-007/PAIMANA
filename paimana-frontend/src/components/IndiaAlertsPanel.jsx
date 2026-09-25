@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { AlertTriangle, CheckCircle, ChevronUp, ChevronDown } from 'lucide-react';
+import { API_BASE_URL } from '../api';
 
 const STORAGE_KEY = 'paimana_flagged_section_collapsed';
 
@@ -35,7 +36,7 @@ export default function IndiaAlertsPanel({ authFetch, onProjectClick }) {
     setLoading(true);
     setError(null);
 
-    const url = 'http://127.0.0.1:8000/india/alerts';
+    const url = `${API_BASE_URL}/india/alerts`;
     const fetchPromise =
       authFetch && typeof authFetch.get === 'function'
         ? authFetch.get(url)
