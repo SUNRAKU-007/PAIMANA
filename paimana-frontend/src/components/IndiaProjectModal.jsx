@@ -486,8 +486,10 @@ export default function IndiaProjectModal({ project, authFetch, userRole, authTo
         )
       );
 
-      if (updatedReport.expenditure_update_cr != null) {
-        setLocalExpenditure(updatedReport.expenditure_update_cr);
+      if (updatedReport.new_expenditure_cr != null) {
+        setLocalExpenditure(updatedReport.new_expenditure_cr);
+      } else if (updatedReport.expenditure_update_cr != null) {
+        setLocalExpenditure((prev) => (Number(prev) || 0) + Number(updatedReport.expenditure_update_cr));
       }
       if (updatedReport.progress_pct != null) {
         setLocalProgress(updatedReport.progress_pct);

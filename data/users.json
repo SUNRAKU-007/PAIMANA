@@ -4,19 +4,52 @@
       "username": "admin",
       "hashed_password": "$2b$12$ElOyLrxbwmFjCmnytiZejOek.7H3m43yz4GcHzgEsmBk2GtuG/DoS",
       "role": "admin",
-      "full_name": "System Admin"
+      "full_name": "System Admin",
+      "is_verified": true,
+      "id": "admin"
     },
     {
       "username": "officer1",
       "hashed_password": "$2b$12$e4sd.sPIRrqNiH.tEhWp9eyvzOftTi1bHaxM221E6p8feQ1n3ys/C",
       "role": "field_officer",
-      "full_name": "Field Officer"
+      "full_name": "Field Officer",
+      "is_verified": true,
+      "id": "officer1"
     },
     {
       "username": "demo_user",
       "hashed_password": "$2b$12$iy7emmpT1Rzh.1Xr/Erkd.k2pNgQQHxjrZsyK3s6mlsm/lFGZ69Ni",
       "role": "public",
-      "full_name": "Demo Citizen"
+      "full_name": "Demo Citizen",
+      "is_verified": true,
+      "id": "demo_user"
+    },
+    {
+      "username": "test_citizen",
+      "hashed_password": "$2b$12$nLcIkei7H5QCcR9oFL/Ia.25sha.JRJC829M7lYBY3eHMvnQD3i9W",
+      "role": "public",
+      "full_name": "Test Citizen",
+      "is_verified": true,
+      "id": "test_citizen"
+    },
+    {
+      "username": "sunraku_07",
+      "hashed_password": "$2b$12$4bIr1fY6PrdzUtatJ6iwKemS0i5ASm4fiGmmcpQIzJlJNk1brtyga",
+      "role": "public",
+      "full_name": "Sunraku",
+      "is_verified": true,
+      "id": "sunraku_07"
+    },
+    {
+      "id": "contractor1",
+      "user_id": "contractor1",
+      "username": "contractor1",
+      "hashed_password": "$2b$12$Bg9W3/fVSnR4pWrP.zWSrOO9Y6nvddjUUzWtwQHD8h9J6K0leulKO",
+      "role": "contractor",
+      "full_name": "contractor",
+      "is_verified": true,
+      "assigned_project_id": "900000",
+      "created_at": "2026-09-23T13:01:53.249674+00:00"
     },
     {
       "id": "officer2",
@@ -27,6 +60,28 @@
       "full_name": "Field Officer 2",
       "is_verified": true,
       "assigned_project_id": null
+    },
+    {
+      "id": "contractor2",
+      "user_id": "contractor2",
+      "username": "contractor2",
+      "hashed_password": "$2b$12$2OuwWjcWX2b10lrxGrQB8Oh1x2xmOEzkXNiQ6EN/1A9jNSREuqNW2",
+      "role": "contractor",
+      "full_name": "contractor",
+      "is_verified": true,
+      "assigned_project_id": "702668",
+      "created_at": "2026-09-23T13:46:23.105140+00:00"
+    },
+    {
+      "id": "contractor3",
+      "user_id": "contractor3",
+      "username": "contractor3",
+      "hashed_password": "$2b$12$wrPcCqmE/8ifWiOt1aJocueaOnMFKvRbjxdmMkbzWR4yukbABiGea",
+      "role": "contractor",
+      "full_name": "Jane",
+      "is_verified": true,
+      "assigned_project_id": null,
+      "created_at": "2026-09-24T14:05:18.621617+00:00"
     }
   ]
 }

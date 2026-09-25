@@ -1253,7 +1253,8 @@ def confirm_project_report(
 
     # Apply expenditure and/or progress values to the project's real fields
     if target_report.get("expenditure_update_cr") is not None:
-        matching_project["expenditure_cr"] = float(target_report["expenditure_update_cr"])
+        current_exp = float(matching_project.get("expenditure_cr") or 0.0)
+        matching_project["expenditure_cr"] = round(current_exp + float(target_report["expenditure_update_cr"]), 2)
     if target_report.get("progress_pct") is not None:
         matching_project["physical_progress_pct"] = float(target_report["progress_pct"])
 
@@ -1262,6 +1263,9 @@ def confirm_project_report(
         matching_project["status"] = "Ongoing"
 
     target_report["project_status"] = matching_project.get("status")
+    target_report["new_expenditure_cr"] = matching_project.get("expenditure_cr")
+
+    save_reports(reports)
 
     raw["projects"] = projects_list
     _save_projects_file(raw)
