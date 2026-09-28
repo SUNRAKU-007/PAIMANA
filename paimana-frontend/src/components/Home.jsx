@@ -117,7 +117,7 @@ export default function Home({ onExplore, onLogin, onSector, authToken }) {
 
   return (
     <div className="-m-4 md:-m-8">
-      <section className="relative bg-gradient-to-b from-orange-50/70 via-white to-white text-[#16213E] px-6 md:px-12 py-14 md:py-20 border-b border-slate-200">
+      <section className="relative bg-gradient-to-br from-[#FDEBD3] via-[#E6ECF5] to-[#D9E4F2] text-[#16213E] px-6 md:px-12 py-14 md:py-20 border-b border-slate-200">
         <div className="max-w-5xl">
           <p className="inline-flex items-center gap-2 rounded-full border border-orange-200 bg-white px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-[#B45F06]">
             <span className="flex h-2 w-5 overflow-hidden rounded-sm" aria-hidden="true">
@@ -219,7 +219,7 @@ export default function Home({ onExplore, onLogin, onSector, authToken }) {
         </div>
       </section>
 
-      <footer className="bg-white border-t border-slate-200 text-slate-600 text-sm">
+      <footer className="bg-[#1F3057] text-slate-300 text-sm">
         <div className="flex h-1" aria-hidden="true">
           <span className="flex-1 bg-[#FF9933]" />
           <span className="flex-1 bg-white" />
@@ -227,7 +227,7 @@ export default function Home({ onExplore, onLogin, onSector, authToken }) {
         </div>
         <div className="px-6 md:px-12 py-8 flex flex-wrap justify-between gap-2">
           <span>PAIMANA. Infrastructure accountability, in the open.</span>
-          <button onClick={() => onExplore()} className="text-[#B45F06] font-medium hover:underline cursor-pointer">Browse projects</button>
+          <button onClick={() => onExplore()} className="text-[#FF9933] font-medium hover:underline cursor-pointer">Browse projects</button>
         </div>
       </footer>
     </div>
