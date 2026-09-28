@@ -389,19 +389,23 @@ function App() {
           className={[
             'fixed top-0 left-0 h-screen w-60 flex flex-col z-40 transition-transform duration-300 ease-in-out',
             isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
+            'bg-white border-r border-slate-200',
           ].join(' ')}
-          style={{ backgroundColor: '#16213E' }}
         >
-          <div className="px-6 pt-8 pb-6">
-            <div
-              className="rounded-full mb-1.5"
-              style={{ width: 24, height: 3, backgroundColor: '#E8871E' }}
-            />
+          <div className="flex h-1 w-full" aria-hidden="true">
+            <span className="flex-1 bg-[#FF9933]" />
+            <span className="flex-1 bg-white" />
+            <span className="flex-1 bg-[#138808]" />
+          </div>
+          <div className="px-6 pt-7 pb-6 border-b border-slate-100">
             <span
-              className="text-white text-xl font-bold tracking-widest"
-              style={{ fontFamily: "'Georgia', 'Times New Roman', serif" }}
+              className="block text-[#16213E] text-xl font-bold tracking-widest"
+              style={{ fontFamily: "'Fraunces', 'Georgia', serif" }}
             >
               PAIMANA
+            </span>
+            <span className="block mt-1 text-[11px] leading-snug text-slate-500">
+              पैमाना · Infrastructure Project Monitoring
             </span>
           </div>
 
@@ -443,16 +447,15 @@ function App() {
                     className={[
                       'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-left cursor-pointer',
                       isActive
-                        ? 'text-white border-l-2'
-                        : 'text-slate-300 hover:bg-white/5 border-l-2 border-transparent',
+                        ? 'text-[#16213E] bg-orange-50 border-l-2 border-[#E8871E] font-semibold'
+                        : 'text-slate-600 hover:bg-slate-50 hover:text-[#16213E] border-l-2 border-transparent',
                     ].join(' ')}
-                    style={isActive ? { backgroundColor: 'rgba(255,255,255,0.10)', borderLeftColor: '#E8871E' } : {}}
                   >
-                    <Icon size={17} className="shrink-0" />
+                    <Icon size={17} className={isActive ? 'shrink-0 text-[#E8871E]' : 'shrink-0'} />
                     {label}
                   </button>
                   {caption && (
-                    <p className="text-xs text-slate-400 px-3 pt-0.5 pb-1 leading-snug ml-8">{caption}</p>
+                    <p className="text-xs text-slate-500 px-3 pt-0.5 pb-1 leading-snug ml-8">{caption}</p>
                   )}
                 </div>
               )
@@ -461,7 +464,7 @@ function App() {
         </aside>
 
         {/* Main content */}
-        <div className="ml-0 md:ml-60 flex-1 flex flex-col min-h-screen" style={{ backgroundColor: '#FAF8F3' }}>
+        <div className="ml-0 md:ml-60 flex-1 flex flex-col min-h-screen" style={{ backgroundColor: '#F7F8FA' }}>
 
           {/* Top bar */}
           <header className="sticky top-0 z-20 bg-white border-b border-slate-200 px-4 md:px-8 py-3 flex items-center justify-between">

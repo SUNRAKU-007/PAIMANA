@@ -117,14 +117,20 @@ export default function Home({ onExplore, onLogin, onSector, authToken }) {
 
   return (
     <div className="-m-4 md:-m-8">
-      <section className="bg-[#16213E] text-white px-6 md:px-12 py-14 md:py-20">
+      <section className="relative bg-gradient-to-b from-orange-50/70 via-white to-white text-[#16213E] px-6 md:px-12 py-14 md:py-20 border-b border-slate-200">
         <div className="max-w-5xl">
-          <div className="rounded-full mb-4" style={{ width: 40, height: 4, backgroundColor: '#E8871E' }} />
-          <p className="text-sm uppercase tracking-[0.2em] text-slate-300">पैमाना · The Yardstick</p>
-          <h1 className="mt-3 text-4xl md:text-6xl font-bold leading-tight text-balance" style={{ fontFamily: "'Fraunces', serif" }}>
+          <p className="inline-flex items-center gap-2 rounded-full border border-orange-200 bg-white px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-[#B45F06]">
+            <span className="flex h-2 w-5 overflow-hidden rounded-sm" aria-hidden="true">
+              <span className="flex-1 bg-[#FF9933]" />
+              <span className="flex-1 bg-slate-200" />
+              <span className="flex-1 bg-[#138808]" />
+            </span>
+            पैमाना · The Yardstick
+          </p>
+          <h1 className="mt-5 text-4xl md:text-6xl font-bold leading-tight text-balance" style={{ fontFamily: "'Fraunces', serif" }}>
             Public money, measured in public.
           </h1>
-          <p className="mt-5 max-w-2xl text-base md:text-lg text-slate-300 leading-relaxed">
+          <p className="mt-5 max-w-2xl text-base md:text-lg text-slate-600 leading-relaxed">
             PAIMANA tracks India&apos;s ongoing infrastructure projects: how much has been spent, how much work has actually been done,
             and who is accountable. When the two drift apart, it says so.
           </p>
@@ -133,22 +139,22 @@ export default function Home({ onExplore, onLogin, onSector, authToken }) {
               Browse all projects <ArrowRight size={16} />
             </button>
             {!authToken && (
-              <button onClick={onLogin} className="px-5 py-3 rounded-lg border border-white/30 hover:bg-white/10 font-medium cursor-pointer transition-colors">
+              <button onClick={onLogin} className="px-5 py-3 rounded-lg border border-slate-300 bg-white text-[#16213E] hover:border-[#16213E] font-medium cursor-pointer transition-colors">
                 Log in or register
               </button>
             )}
           </div>
 
-          <dl className="mt-12 grid grid-cols-2 md:grid-cols-4 gap-6">
+          <dl className="mt-12 grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
-              ['Projects tracked', stats?.total_projects?.toLocaleString('en-IN')],
-              ['Sanctioned cost', stats && fmtCr(stats.total_cost_cr)],
-              ['Spent so far', stats && fmtCr(stats.total_spent_cr)],
-              ['Spend-vs-progress alerts', stats?.spend_alerts?.toLocaleString('en-IN')],
-            ].map(([label, value]) => (
-              <div key={label} className="border-l-2 border-[#E8871E] pl-4">
-                <dt className="text-xs uppercase tracking-wider text-slate-400">{label}</dt>
-                <dd className="text-2xl md:text-3xl font-bold mt-1">{value ?? '...'}</dd>
+              ['Projects tracked', stats?.total_projects?.toLocaleString('en-IN'), 'border-t-[#16213E]'],
+              ['Sanctioned cost', stats && fmtCr(stats.total_cost_cr), 'border-t-[#FF9933]'],
+              ['Spent so far', stats && fmtCr(stats.total_spent_cr), 'border-t-[#138808]'],
+              ['Spend-vs-progress alerts', stats?.spend_alerts?.toLocaleString('en-IN'), 'border-t-red-600'],
+            ].map(([label, value, accent]) => (
+              <div key={label} className={`rounded-xl bg-white border border-slate-200 border-t-4 ${accent} p-4 shadow-sm`}>
+                <dt className="text-xs uppercase tracking-wider text-slate-500">{label}</dt>
+                <dd className="text-2xl md:text-3xl font-bold mt-1 text-[#16213E]">{value ?? '...'}</dd>
               </div>
             ))}
           </dl>
@@ -213,9 +219,16 @@ export default function Home({ onExplore, onLogin, onSector, authToken }) {
         </div>
       </section>
 
-      <footer className="px-6 md:px-12 py-8 bg-[#16213E] text-slate-400 text-sm flex flex-wrap justify-between gap-2">
-        <span>PAIMANA. Infrastructure accountability, in the open.</span>
-        <button onClick={() => onExplore()} className="text-[#E8871E] hover:underline cursor-pointer">Browse projects</button>
+      <footer className="bg-white border-t border-slate-200 text-slate-600 text-sm">
+        <div className="flex h-1" aria-hidden="true">
+          <span className="flex-1 bg-[#FF9933]" />
+          <span className="flex-1 bg-white" />
+          <span className="flex-1 bg-[#138808]" />
+        </div>
+        <div className="px-6 md:px-12 py-8 flex flex-wrap justify-between gap-2">
+          <span>PAIMANA. Infrastructure accountability, in the open.</span>
+          <button onClick={() => onExplore()} className="text-[#B45F06] font-medium hover:underline cursor-pointer">Browse projects</button>
+        </div>
       </footer>
     </div>
   )
