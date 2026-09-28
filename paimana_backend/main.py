@@ -83,6 +83,7 @@ else:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
+    allow_origin_regex=r"^(https://[a-z0-9-]+\.(vusercontent\.net|vercel\.app|v0\.app)|http://(localhost|127\.0\.0\.1):\d+)$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
