@@ -199,6 +199,12 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
     user = get_user(username)
     if user is None:
         raise credentials_exception
+    if user.get("account_status") in ("suspended", "rejected"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="This account is no longer active",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return user
 
 

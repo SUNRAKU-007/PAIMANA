@@ -34,6 +34,16 @@ from auth import (
     VALID_ROLES,
 )
 
+from store import (
+    spend_analysis,
+    get_settings,
+    log_audit,
+    load_issued_ids,
+    save_issued_ids,
+    load_notices,
+    now_iso,
+)
+
 load_dotenv()
 _api_key = os.getenv("GEMINI_API_KEY")
 gemini_client = genai.Client(api_key=_api_key) if _api_key else None
@@ -442,11 +452,37 @@ def assistant_ask(request: AskRequest, current_user: dict = Depends(require_veri
 
 # ── India Project Reports Helpers ─────────────────────────────────────
 
+SPEND_CATEGORIES = [
+    "Materials",
+    "Labour",
+    "Machinery & Equipment",
+    "Land Acquisition",
+    "Design & Consultancy",
+    "Statutory Clearances",
+    "Utility Shifting",
+    "Mobilisation Advance",
+    "Other",
+]
+
+MEASUREMENT_METHODS = [
+    "Measurement Book (quantity measured on site)",
+    "Milestone completion certificate",
+    "Drone / photo survey",
+    "Third-party engineer verification",
+    "Running bill verification",
+]
+
+
 class ProjectReportRequest(BaseModel):
     expenditure_update_cr: Optional[float] = None
     progress_pct: Optional[float] = None
     delay_reason: Optional[str] = None
     notes: Optional[str] = ""
+    spend_category: Optional[str] = None
+    spend_description: Optional[str] = None
+    bill_reference: Optional[str] = None
+    measurement_method: Optional[str] = None
+    measurement_details: Optional[str] = None
 
 
 def _get_reports_file_path() -> str:
@@ -563,6 +599,15 @@ def compute_india_risk(project: dict, reports: Optional[list] = None) -> dict:
         except Exception:
             pass
 
+    # 3b. Money spent is far ahead of physical progress
+    spend = spend_analysis(project)
+    if spend["spend_alert"]:
+        label = "Critical spend gap" if spend["spend_alert"] == "critical" else "Spend ahead of progress"
+        risk_reasons.append(
+            f"{label}: {spend['spend_pct']}% of budget spent but only "
+            f"{float(project.get('physical_progress_pct')):g}% physical progress ({spend['progress_gap']:g} pt gap)"
+        )
+
     # 4. Contractor operational delay
     if project.get("is_delayed_by_contractor"):
         r_text = project.get("contractor_delay_reason") or "Contractor reported operational delay"
@@ -674,6 +719,7 @@ def list_india_projects(
         risk_info = compute_india_risk(cleaned, reports=reports)
         cleaned["is_flagged"] = risk_info["is_flagged"]
         cleaned["risk_reasons"] = risk_info["risk_reasons"]
+        cleaned.update(spend_analysis(cleaned))
 
         results.append(cleaned)
 
@@ -784,6 +830,7 @@ def _project_to_response(project: dict, reports=None) -> dict:
     risk_info = compute_india_risk(cleaned, reports=reports)
     cleaned["is_flagged"] = risk_info["is_flagged"]
     cleaned["risk_reasons"] = risk_info["risk_reasons"]
+    cleaned.update(spend_analysis(cleaned))
     cleaned["assigned_officer"] = project.get("assigned_officer", None)
     cleaned["assigned_contractor"] = project.get("assigned_contractor", None)
     return cleaned
@@ -1215,6 +1262,23 @@ def create_project_report(
                 detail="You are not assigned to this project.",
             )
 
+    if report_data.expenditure_update_cr is not None:
+        if report_data.expenditure_update_cr < 0:
+            raise HTTPException(status_code=400, detail="Expenditure update cannot be negative.")
+        if report_data.spend_category not in SPEND_CATEGORIES:
+            raise HTTPException(status_code=400, detail="Choose what the money was spent on (spend category).")
+        if not (report_data.spend_description or "").strip():
+            raise HTTPException(status_code=400, detail="Describe what this expenditure paid for.")
+        if not (report_data.bill_reference or "").strip():
+            raise HTTPException(status_code=400, detail="Provide a bill / voucher reference for the expenditure.")
+    if report_data.progress_pct is not None:
+        if not 0 <= report_data.progress_pct <= 100:
+            raise HTTPException(status_code=400, detail="Progress must be between 0 and 100.")
+        if report_data.measurement_method not in MEASUREMENT_METHODS:
+            raise HTTPException(status_code=400, detail="Choose how the physical progress was measured.")
+        if not (report_data.measurement_details or "").strip():
+            raise HTTPException(status_code=400, detail="Describe what was measured to arrive at the progress figure.")
+
     report_id = str(uuid.uuid4())[:8]
     report_entry = {
         "id": report_id,
@@ -1226,6 +1290,11 @@ def create_project_report(
         "progress_pct": report_data.progress_pct,
         "delay_reason": report_data.delay_reason,
         "notes": report_data.notes or "",
+        "spend_category": report_data.spend_category if report_data.expenditure_update_cr is not None else None,
+        "spend_description": (report_data.spend_description or "").strip() or None,
+        "bill_reference": (report_data.bill_reference or "").strip() or None,
+        "measurement_method": report_data.measurement_method if report_data.progress_pct is not None else None,
+        "measurement_details": (report_data.measurement_details or "").strip() or None,
         "status": "pending_confirmation",
     }
     reports = load_reports()
@@ -1845,6 +1914,45 @@ def get_india_notifications(
                     "action_required": True,
                 })
 
+            # Priority 2b: spending running ahead of physical progress
+            spend = spend_analysis(p)
+            if spend["spend_alert"]:
+                critical = spend["spend_alert"] == "critical"
+                who = "Contractor explanation required" if role == "contractor" else "Verify spend and measurement"
+                items.append({
+                    "project_id": pid,
+                    "name": p_name,
+                    "project_name": p_name,
+                    "sector": sector,
+                    "state": state,
+                    "timestamp": None,
+                    "type": "spend_gap",
+                    "severity": spend["spend_alert"],
+                    "action_required": True,
+                    "summary": (
+                        f"{'CRITICAL' if critical else 'Warning'} - {who}: {spend['spend_pct']}% of budget spent "
+                        f"vs {float(p.get('physical_progress_pct')):g}% progress ({spend['progress_gap']:g} pt gap)"
+                    ),
+                })
+
+            # Priority 2c: formal notices issued by administration
+            if role == "contractor":
+                for n in load_notices():
+                    if str(n.get("project_id")) == pid and not n.get("resolved"):
+                        items.append({
+                            "project_id": pid,
+                            "name": p_name,
+                            "project_name": p_name,
+                            "sector": sector,
+                            "state": state,
+                            "timestamp": n.get("created_at"),
+                            "type": "admin_notice",
+                            "notice_id": n.get("id"),
+                            "severity": n.get("severity"),
+                            "action_required": not n.get("response"),
+                            "summary": f"Admin notice: {n.get('message')}" + (" (response submitted)" if n.get("response") else " - response required"),
+                        })
+
             # Priority 3: Recent report updates on assigned project (up to 5)
             for r in proj_reports[:5]:
                 rid = str(r.get("report_id"))
@@ -2156,6 +2264,8 @@ class RegisterRequest(BaseModel):
     password: str
     full_name: Optional[str] = ""
     role: Optional[str] = "public"
+    verification_id: Optional[str] = None
+    organization: Optional[str] = None
 
 
 @app.post("/auth/login")
@@ -2167,6 +2277,17 @@ def login(form_data: OAuth2PasswordRequestForm = Depends()):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
+        )
+    if user.get("account_status") == "suspended":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This account has been suspended by an administrator.",
+        )
+    if user.get("account_status") == "rejected":
+        reason = user.get("rejection_reason") or "no reason recorded"
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Your registration was rejected by an administrator: {reason}",
         )
     is_verified = user.get("is_verified", True if user.get("role") not in ("contractor", "field_officer", "officer") else False)
     assigned_project_id = user.get("assigned_project_id", None)
@@ -2222,6 +2343,33 @@ def register(request: RegisterRequest):
 
     is_verified = False if requested_role in ("contractor", "field_officer") else True
 
+    issued_record = None
+    issued_ids = None
+    if requested_role in ("contractor", "field_officer"):
+        code = (request.verification_id or "").strip().upper()
+        if not code:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A verification ID issued by PAIMANA administration is required to register as a contractor or field officer.",
+            )
+        if not (request.organization or "").strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Enter your company (contractor) or department (officer).",
+            )
+        issued_ids = load_issued_ids()
+        issued_record = next((i for i in issued_ids if i.get("code") == code), None)
+        if not issued_record or issued_record.get("revoked"):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This verification ID is not valid.")
+        if issued_record.get("used_by"):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This verification ID has already been used.")
+        if issued_record.get("role") != requested_role:
+            expected = "field officer" if issued_record.get("role") == "field_officer" else "contractor"
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"This verification ID was issued for a {expected} account.",
+            )
+
     new_user = {
         "id": username,
         "user_id": username,
@@ -2232,7 +2380,15 @@ def register(request: RegisterRequest):
         "is_verified": is_verified,
         "assigned_project_id": None,
         "created_at": datetime.now(timezone.utc).isoformat(),
+        "account_status": "pending" if not is_verified else "active",
     }
+    if issued_record:
+        new_user["verification_id"] = issued_record["code"]
+        new_user["organization"] = request.organization.strip()
+        issued_record["used_by"] = username
+        issued_record["used_at"] = now_iso()
+        save_issued_ids(issued_ids)
+        log_audit(username, "register_with_id", issued_record["code"], f"{requested_role} registration")
     users = load_users()
     users.append(new_user)
     save_users(users)
@@ -2339,3 +2495,9 @@ def verify_user_account(user_id: str, current_user: dict = Depends(require_role(
     }
 
 
+
+
+# ── Governance: admin powers, verification IDs, notices, ledger, public stats ──
+from governance import router as governance_router  # noqa: E402
+
+app.include_router(governance_router)
