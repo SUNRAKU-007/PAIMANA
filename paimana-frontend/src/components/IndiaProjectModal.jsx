@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Bell, Check, User, Shield, HardHat, ShieldCheck } from 'lucide-react';
-import { API_BASE_URL } from '../api';
+import api, { API_BASE_URL } from '../api';
+import ProjectLedger from './ProjectLedger';
 
 const formatCost = (value) => {
   if (value == null || value === '') return '—';
@@ -17,7 +18,17 @@ export default function IndiaProjectModal({ project, authFetch, userRole, authTo
   const [expenditureUpdate, setExpenditureUpdate] = useState('');
   const [progressPct, setProgressPct] = useState('');
   const [delayReason, setDelayReason] = useState('');
+  const [spendCategory, setSpendCategory] = useState('');
+  const [spendDescription, setSpendDescription] = useState('');
+  const [billReference, setBillReference] = useState('');
+  const [measurementMethod, setMeasurementMethod] = useState('');
+  const [measurementDetails, setMeasurementDetails] = useState('');
+  const [reportOptions, setReportOptions] = useState({ spend_categories: [], measurement_methods: [] });
   const [reportNotes, setReportNotes] = useState('');
+
+  useEffect(() => {
+    api.get('/india/measurement-options').then((r) => setReportOptions(r.data)).catch(() => {});
+  }, []);
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
   const [reportSubmitError, setReportSubmitError] = useState(null);
   const [reportSubmitSuccess, setReportSubmitSuccess] = useState(false);
@@ -420,10 +431,24 @@ export default function IndiaProjectModal({ project, authFetch, userRole, authTo
       return;
     }
 
+    if (trimmedExp !== '' && (!spendCategory || !spendDescription.trim() || !billReference.trim())) {
+      setReportSubmitError('For spending, choose a category and give a description and the bill or voucher reference.');
+      return;
+    }
+    if (trimmedProg !== '' && (!measurementMethod || !measurementDetails.trim())) {
+      setReportSubmitError('For progress, say how it was measured and give the measurement details.');
+      return;
+    }
+
     setIsSubmittingReport(true);
     setReportSubmitError(null);
 
     const payload = {
+      spend_category: trimmedExp !== '' ? spendCategory : null,
+      spend_description: trimmedExp !== '' ? spendDescription.trim() : null,
+      bill_reference: trimmedExp !== '' ? billReference.trim() : null,
+      measurement_method: trimmedProg !== '' ? measurementMethod : null,
+      measurement_details: trimmedProg !== '' ? measurementDetails.trim() : null,
       expenditure_update_cr: trimmedExp !== '' ? Number(trimmedExp) : null,
       progress_pct: trimmedProg !== '' ? Number(trimmedProg) : null,
       delay_reason: delayReason.trim() ? delayReason.trim() : null,
@@ -458,6 +483,11 @@ export default function IndiaProjectModal({ project, authFetch, userRole, authTo
       setExpenditureUpdate('');
       setProgressPct('');
       setDelayReason('');
+      setSpendCategory('');
+      setSpendDescription('');
+      setBillReference('');
+      setMeasurementMethod('');
+      setMeasurementDetails('');
       setReportNotes('');
       setReportSubmitSuccess(true);
       setTimeout(() => {
@@ -1396,6 +1426,10 @@ export default function IndiaProjectModal({ project, authFetch, userRole, authTo
           </div>
         )}
 
+        <div className="mt-6 pt-5 border-t border-slate-100">
+          <ProjectLedger key={`${project.project_id}-${reports.length}`} projectId={project.project_id} userRole={userRole} />
+        </div>
+
         {/* 6. Field Reports Section */}
         <div className="mt-6 pt-5 border-t border-slate-100">
           <div className="flex items-center justify-between mb-3">
@@ -1454,6 +1488,35 @@ export default function IndiaProjectModal({ project, authFetch, userRole, authTo
                     />
                   </div>
                 </div>
+
+                {expenditureUpdate.trim() !== '' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-lg border border-amber-200 bg-amber-50/50 p-3">
+                    <p className="sm:col-span-2 text-xs font-semibold text-amber-900">Where was this money spent?</p>
+                    <select value={spendCategory} onChange={(e) => setSpendCategory(e.target.value)} aria-label="Spend category"
+                      className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs">
+                      <option value="">Select category</option>
+                      {reportOptions.spend_categories.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                    <input type="text" value={billReference} onChange={(e) => setBillReference(e.target.value)} placeholder="Bill / voucher reference"
+                      className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs" />
+                    <input type="text" value={spendDescription} onChange={(e) => setSpendDescription(e.target.value)} placeholder="What was bought or paid for"
+                      className="sm:col-span-2 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs" />
+                  </div>
+                )}
+
+                {progressPct.trim() !== '' && (
+                  <div className="grid grid-cols-1 gap-3 rounded-lg border border-blue-200 bg-blue-50/50 p-3">
+                    <p className="text-xs font-semibold text-blue-900">How was this progress measured?</p>
+                    <select value={measurementMethod} onChange={(e) => setMeasurementMethod(e.target.value)} aria-label="Measurement method"
+                      className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs">
+                      <option value="">Select method</option>
+                      {reportOptions.measurement_methods.map((m) => <option key={m} value={m}>{m}</option>)}
+                    </select>
+                    <input type="text" value={measurementDetails} onChange={(e) => setMeasurementDetails(e.target.value)}
+                      placeholder="e.g. 12.4 km of 20 km laid, chainage 5+200 to 17+600"
+                      className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs" />
+                  </div>
+                )}
 
                 {/* Delay Reason */}
                 <div>

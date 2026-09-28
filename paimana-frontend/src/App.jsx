@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Building2, FlaskConical, Menu, Bookmark, LogIn, UserCheck, Clock, RefreshCw } from 'lucide-react'
+import { Home as Home2, Shield, Building2, FlaskConical, Menu, Bookmark, LogIn, UserCheck, Clock, RefreshCw } from 'lucide-react'
 import api, { setOnUnauthorizedCallback, API_BASE_URL } from './api'
 import Login from './components/Login'
 import KpiCards from './components/KpiCards'
@@ -14,6 +14,8 @@ import IndiaAlertsPanel from './components/IndiaAlertsPanel'
 import MyFollowing from './components/MyFollowing'
 import ContractorApprovals from './components/ContractorApprovals'
 import WelcomeBanner from './components/WelcomeBanner'
+import Home from './components/Home'
+import AdminConsole from './components/AdminConsole'
 
 function App() {
   const [authToken, setAuthToken] = useState(() => localStorage.getItem('authToken'))
@@ -38,7 +40,7 @@ function App() {
   const [showLoginOverlay, setShowLoginOverlay] = useState(false)
 
   // ── Active sidebar section ────────────────────────────────────────────────
-  const [activeSection, setActiveSection] = useState('indian-projects')
+  const [activeSection, setActiveSection] = useState('home')
 
   // ── Mobile sidebar drawer ─────────────────────────────────────────────────
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
@@ -57,7 +59,7 @@ function App() {
     setSummary(null)
     setProjects([])
     setSelectedIndiaProject(null)
-    setActiveSection('indian-projects')
+    setActiveSection('home')
   }
 
   function handleLoginSuccess(token, role, fullName, isVerifiedVal, assignedProjId) {
@@ -387,25 +389,33 @@ function App() {
           className={[
             'fixed top-0 left-0 h-screen w-60 flex flex-col z-40 transition-transform duration-300 ease-in-out',
             isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
+            'bg-[#1F3057] border-r border-[#2A3D68]',
           ].join(' ')}
-          style={{ backgroundColor: '#16213E' }}
         >
-          <div className="px-6 pt-8 pb-6">
-            <div
-              className="rounded-full mb-1.5"
-              style={{ width: 24, height: 3, backgroundColor: '#E8871E' }}
-            />
+          <div className="flex h-1 w-full" aria-hidden="true">
+            <span className="flex-1 bg-[#FF9933]" />
+            <span className="flex-1 bg-white" />
+            <span className="flex-1 bg-[#138808]" />
+          </div>
+          <div className="px-6 pt-7 pb-6 border-b border-white/10">
             <span
-              className="text-white text-xl font-bold tracking-widest"
-              style={{ fontFamily: "'Georgia', 'Times New Roman', serif" }}
+              className="block text-white text-xl font-bold tracking-widest"
+              style={{ fontFamily: "'Fraunces', 'Georgia', serif" }}
             >
               PAIMANA
+            </span>
+            <span className="block mt-1 text-[11px] leading-snug text-slate-300">
+              पैमाना · Infrastructure Project Monitoring
             </span>
           </div>
 
           <nav className="flex flex-col gap-1 px-3 flex-1">
             {[
-              { id: 'indian-projects', label: 'Indian Projects', Icon: Building2 },
+              { id: 'home', label: 'Home', Icon: Home2 },
+              { id: 'indian-projects', label: 'Projects', Icon: Building2 },
+              ...(authToken && userRole === 'admin'
+                ? [{ id: 'admin-console', label: 'Admin Console', Icon: Shield, caption: 'Alerts, audit trail, IDs and overrides' }]
+                : []),
               // My Projects: only logged-in public users
               ...(authToken && userRole === 'public'
                 ? [{ id: 'my-projects', label: 'My Projects', Icon: Bookmark }]
@@ -437,12 +447,11 @@ function App() {
                     className={[
                       'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-left cursor-pointer',
                       isActive
-                        ? 'text-white border-l-2'
-                        : 'text-slate-300 hover:bg-white/5 border-l-2 border-transparent',
+                        ? 'text-white bg-white/10 border-l-2 border-[#FF9933] font-semibold'
+                        : 'text-slate-300 hover:bg-white/5 hover:text-white border-l-2 border-transparent',
                     ].join(' ')}
-                    style={isActive ? { backgroundColor: 'rgba(255,255,255,0.10)', borderLeftColor: '#E8871E' } : {}}
                   >
-                    <Icon size={17} className="shrink-0" />
+                    <Icon size={17} className={isActive ? 'shrink-0 text-[#FF9933]' : 'shrink-0'} />
                     {label}
                   </button>
                   {caption && (
@@ -455,7 +464,7 @@ function App() {
         </aside>
 
         {/* Main content */}
-        <div className="ml-0 md:ml-60 flex-1 flex flex-col min-h-screen" style={{ backgroundColor: '#FAF8F3' }}>
+        <div className="ml-0 md:ml-60 flex-1 flex flex-col min-h-screen" style={{ backgroundColor: '#ECEFF4' }}>
 
           {/* Top bar */}
           <header className="sticky top-0 z-20 bg-white border-b border-slate-200 px-4 md:px-8 py-3 flex items-center justify-between">
@@ -511,7 +520,20 @@ function App() {
             </div>
           </header>
 
-          <main className="flex-1 p-8">
+          <main className="flex-1 p-4 md:p-8">
+
+            {activeSection === 'home' && (
+              <Home
+                authToken={authToken}
+                onExplore={() => setActiveSection('indian-projects')}
+                onSector={() => setActiveSection('indian-projects')}
+                onLogin={() => setShowLoginOverlay(true)}
+              />
+            )}
+
+            {activeSection === 'admin-console' && authToken && userRole === 'admin' && (
+              <AdminConsole />
+            )}
 
             {/* Indian Projects */}
             {activeSection === 'indian-projects' && (
