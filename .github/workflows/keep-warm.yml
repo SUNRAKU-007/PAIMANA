@@ -1,0 +1,24 @@
+# Pings the backend so free-tier hosts (e.g. Render) don't put it to sleep.
+# Setup: repo Settings -> Secrets and variables -> Actions -> New secret
+#   BACKEND_URL = https://your-backend.onrender.com   (no trailing slash)
+name: Keep backend warm
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Ping /health
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
+        run: |
+          if [ -z "$BACKEND_URL" ]; then
+            echo "BACKEND_URL secret is not set; skipping."
+            exit 0
+          fi
+          curl --fail --silent --show-error --retry 3 --retry-delay 20 --max-time 90 "$BACKEND_URL/health"

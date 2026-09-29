@@ -78,11 +78,12 @@ export default function AssistantChat({
           { role: "assistant", text: res.data.answer },
         ]);
       })
-      .catch(() => {
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", text: "Something went wrong. Please try again." },
-        ]);
+      .catch((err) => {
+        const text =
+          err?.response?.status === 429
+            ? "You're asking a bit too fast. Please wait a minute and try again."
+            : "Something went wrong. Please try again.";
+        setMessages((prev) => [...prev, { role: "assistant", text }]);
       })
       .finally(() => setIsLoading(false));
   }

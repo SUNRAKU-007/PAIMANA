@@ -35,8 +35,12 @@ load_dotenv(os.path.join(BASE_DIR, "..", ".env"))
 # ── JWT Configuration ──────────────────────────────────────────────────
 SECRET_KEY = os.getenv("JWT_SECRET")
 if not SECRET_KEY:
-    # Fallback to generating one and persisting to .env if needed
+    # A random per-process key means every restart/redeploy logs all users out.
     SECRET_KEY = secrets.token_hex(32)
+    print(
+        "[security] JWT_SECRET is not set: using a temporary key. All sessions will be "
+        "invalidated on restart. Set JWT_SECRET (e.g. `openssl rand -hex 32`) in production."
+    )
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 24

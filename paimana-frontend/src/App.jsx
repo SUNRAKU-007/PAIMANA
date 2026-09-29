@@ -14,8 +14,7 @@ import IndiaAlertsPanel from './components/IndiaAlertsPanel'
 import MyFollowing from './components/MyFollowing'
 import ContractorApprovals from './components/ContractorApprovals'
 import WelcomeBanner from './components/WelcomeBanner'
-import Home from './components/Home'
-import AdminConsole from './components/AdminConsole'
+import ServerWakeNotice from './components/ServerWakeNotice'
 
 function App() {
   const [authToken, setAuthToken] = useState(() => localStorage.getItem('authToken'))
@@ -40,7 +39,7 @@ function App() {
   const [showLoginOverlay, setShowLoginOverlay] = useState(false)
 
   // ── Active sidebar section ────────────────────────────────────────────────
-  const [activeSection, setActiveSection] = useState('home')
+  const [activeSection, setActiveSection] = useState('indian-projects')
 
   // ── Mobile sidebar drawer ─────────────────────────────────────────────────
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
@@ -59,7 +58,7 @@ function App() {
     setSummary(null)
     setProjects([])
     setSelectedIndiaProject(null)
-    setActiveSection('home')
+    setActiveSection('indian-projects')
   }
 
   function handleLoginSuccess(token, role, fullName, isVerifiedVal, assignedProjId) {
@@ -373,6 +372,7 @@ function App() {
   // ── App Shell — renders for everyone (logged in or guest) ───────────────────
   return (
     <>
+      <ServerWakeNotice />
       <div className="flex min-h-screen">
 
         {/* Mobile backdrop */}
@@ -411,11 +411,7 @@ function App() {
 
           <nav className="flex flex-col gap-1 px-3 flex-1">
             {[
-              { id: 'home', label: 'Home', Icon: Home2 },
-              { id: 'indian-projects', label: 'Projects', Icon: Building2 },
-              ...(authToken && userRole === 'admin'
-                ? [{ id: 'admin-console', label: 'Admin Console', Icon: Shield, caption: 'Alerts, audit trail, IDs and overrides' }]
-                : []),
+              { id: 'indian-projects', label: 'Indian Projects', Icon: Building2 },
               // My Projects: only logged-in public users
               ...(authToken && userRole === 'public'
                 ? [{ id: 'my-projects', label: 'My Projects', Icon: Bookmark }]
@@ -521,19 +517,6 @@ function App() {
           </header>
 
           <main className="flex-1 p-4 md:p-8">
-
-            {activeSection === 'home' && (
-              <Home
-                authToken={authToken}
-                onExplore={() => setActiveSection('indian-projects')}
-                onSector={() => setActiveSection('indian-projects')}
-                onLogin={() => setShowLoginOverlay(true)}
-              />
-            )}
-
-            {activeSection === 'admin-console' && authToken && userRole === 'admin' && (
-              <AdminConsole />
-            )}
 
             {/* Indian Projects */}
             {activeSection === 'indian-projects' && (

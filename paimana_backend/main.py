@@ -5,9 +5,12 @@ Loads the dataset + trained models on startup, serves project data and predictio
 
 import re
 import os
+import math
 import time
 import json
 import uuid
+import threading
+from functools import lru_cache
 from typing import Optional, Literal
 from datetime import datetime, timedelta, timezone
 import numpy as np
@@ -16,10 +19,12 @@ import joblib
 from fastapi import FastAPI, HTTPException, Query, Depends, status
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import Response
+from pydantic import BaseModel, Field
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from dotenv import load_dotenv
-from google import genai
+from ratelimit import rate_limit
 
 from auth import (
     authenticate_user,
@@ -42,11 +47,22 @@ from store import (
     save_issued_ids,
     load_notices,
     now_iso,
+    file_version,
+    settings_version,
 )
 
 load_dotenv()
 _api_key = os.getenv("GEMINI_API_KEY")
-gemini_client = genai.Client(api_key=_api_key) if _api_key else None
+
+
+@lru_cache(maxsize=1)
+def get_gemini_client():
+    """Create the Gemini client on first use: google-genai is a slow import and most
+    requests never need it, so keep it off the cold-start path."""
+    if not _api_key:
+        return None
+    from google import genai
+    return genai.Client(api_key=_api_key)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -80,14 +96,30 @@ if _env_origins:
 else:
     allowed_origins = _default_origins
 
+_default_origin_regex = r"^(https://[a-z0-9-]+\.(vusercontent\.net|vercel\.app|v0\.app)|http://(localhost|127\.0\.0\.1):\d+)$"
+if not os.environ.get("ALLOWED_ORIGIN_REGEX"):
+    print("[security] ALLOWED_ORIGIN_REGEX not set: any *.vercel.app site may call this API. Set it in production.")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_origin_regex=r"^(https://[a-z0-9-]+\.(vusercontent\.net|vercel\.app|v0\.app)|http://(localhost|127\.0\.0\.1):\d+)$",
+    # Set ALLOWED_ORIGIN_REGEX in production to lock this down to your own deployments, e.g.
+    #   ^https://paimana(-[a-z0-9-]+)?\.vercel\.app$
+    allow_origin_regex=os.environ.get("ALLOWED_ORIGIN_REGEX") or _default_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Total-Count"],
 )
+
+# Project listings are ~1 MB of JSON; gzip shrinks them ~90% on the wire.
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
+
+
+@app.api_route("/health", methods=["GET", "HEAD"], include_in_schema=False)
+def health():
+    """Lightweight liveness probe for uptime pings / keep-warm crons (no disk or model work)."""
+    return {"status": "ok"}
 
 # ── Feature config (must match train_model.py) ───────────────────────
 BASE_FEATURES = [
@@ -123,10 +155,11 @@ cost_model = None
 risk_model = None
 feature_influence: dict = {}
 india_projects_df: pd.DataFrame = pd.DataFrame()
+_india_df_version = None
 
 
 def load_india_projects():
-    global india_projects_df
+    global india_projects_df, _india_df_version
     candidates = [
         os.path.join(".", "data", "india", "real_projects.json"),
         os.path.join("data", "india", "real_projects.json"),
@@ -139,11 +172,13 @@ def load_india_projects():
             file_path = c
             break
 
+    version = file_version(file_path) if file_path else None
+    if version is not None and version == _india_df_version and not india_projects_df.empty:
+        return
+
     if file_path and os.path.exists(file_path):
         try:
-            with open(file_path, "r", encoding="utf-8-sig") as f:
-                data = json.load(f)
-            projects_list = data.get("projects", []) if isinstance(data, dict) else data
+            projects_list = _projects_snapshot()
             df = pd.json_normalize(projects_list)
             if "project_id" not in df.columns:
                 if "id" in df.columns:
@@ -151,6 +186,7 @@ def load_india_projects():
                 elif not df.empty:
                     df["project_id"] = df.index
             india_projects_df = df
+            _india_df_version = version
             print(f"Loaded {len(india_projects_df)} India projects from {file_path}.")
         except Exception as e:
             print(f"Error loading India projects from {file_path}: {e}")
@@ -290,6 +326,14 @@ def load_data_and_models():
     print(f"Loaded {len(projects_df)} Indian infrastructure projects, models ready.")
     load_india_projects()
 
+    # Warm the caches so the very first visitor doesn't pay for building them.
+    try:
+        _india_alerts()
+        from governance import public_stats
+        public_stats()
+    except Exception as e:
+        print(f"Cache warm-up skipped: {e}")
+
 
 # ── Endpoints ──────────────────────────────────────────────────────────
 
@@ -304,7 +348,8 @@ def list_projects(current_user: dict = Depends(require_verified_user)):
         "engineers_estimate", "bid_total", "bid_days", "item_count",
         "actual_cost_overrun_pct", "predicted_overrun_pct", "materials_ppi",
     ]
-    return projects_df[cols].to_dict(orient="records")
+    # projects_df is fixed after startup, so serialize it once.
+    return _cached_json("legacy_projects", id(projects_df), lambda: projects_df[cols].to_dict(orient="records"))
 
 
 @app.get("/projects/{project_id}/risk")
@@ -337,8 +382,6 @@ def project_risk_detail(project_id: int, current_user: dict = Depends(require_ve
 @app.get("/alerts")
 def high_risk_alerts(current_user: dict = Depends(require_verified_user)):
     """Projects predicted as High risk, sorted by predicted delay descending."""
-    high = projects_df[projects_df["predicted_risk_tier"] == "High"].copy()
-    high = high.sort_values("predicted_delay_months", ascending=False)
     cols = [
         "project_id", "project_name", "ministry", "sector", "state",
         "original_cost_cr", "cumulative_expenditure_cr", "physical_progress_pct",
@@ -347,7 +390,12 @@ def high_risk_alerts(current_user: dict = Depends(require_verified_user)):
         "engineers_estimate", "bid_total", "bid_days", "item_count",
         "actual_cost_overrun_pct", "predicted_overrun_pct",
     ]
-    return high[cols].to_dict(orient="records")
+
+    def build():
+        high = projects_df[projects_df["predicted_risk_tier"] == "High"]
+        return high.sort_values("predicted_delay_months", ascending=False)[cols].to_dict(orient="records")
+
+    return _cached_json("legacy_alerts", id(projects_df), build)
 
 
 @app.get("/dashboard/summary")
@@ -382,12 +430,13 @@ def dashboard_summary(current_user: dict = Depends(require_verified_user)):
 
 # ── Pydantic request model for assistant ───────────────────────────────
 class AskRequest(BaseModel):
-    question: str
+    question: str = Field(..., min_length=1, max_length=1000)
 
 
-@app.post("/assistant/ask")
+@app.post("/assistant/ask", dependencies=[Depends(rate_limit("assistant", limit=20, window_s=60))])
 def assistant_ask(request: AskRequest, current_user: dict = Depends(require_verified_user)):
     """Answer user questions about the project data using Gemini."""
+    gemini_client = get_gemini_client()
     if not gemini_client:
         return {
             "answer": "I'm having trouble connecting right now. "
@@ -528,12 +577,23 @@ def save_reports(reports: list):
 
 # ── India Risk Computation ─────────────────────────────────────────────
 
-REF_YEAR = 2026
-REF_MONTH = 8
+def _india_ref_date() -> tuple:
+    """Reference (year, month) for project age / overdue maths on the live India data.
+    Defaults to the current month so ages stay accurate over time; set REF_DATE=YYYY-MM
+    to pin it (e.g. to reproduce the August 2026 MoSPI snapshot exactly)."""
+    pinned = os.environ.get("REF_DATE", "").strip()
+    if pinned:
+        try:
+            y, m = pinned.split("-")[:2]
+            return int(y), int(m)
+        except ValueError:
+            print(f"[config] Ignoring invalid REF_DATE={pinned!r}; expected YYYY-MM.")
+    now = datetime.now(timezone.utc)
+    return now.year, now.month
 
 
 def calculate_project_age_months(start_date_str: Optional[str]) -> Optional[int]:
-    """Calculate project age in months from start_date (mm/YYYY) relative to reference date (August 2026).
+    """Calculate project age in months from start_date (mm/YYYY) relative to the reference month.
     Reuses the exact same calculation as train_model.py and load_data_and_models():
         project_age_months = (REF_YEAR - start_date.year) * 12 + (REF_MONTH - start_date.month)
     """
@@ -543,13 +603,14 @@ def calculate_project_age_months(start_date_str: Optional[str]) -> Optional[int]
         parts = str(start_date_str).strip().split("/")
         if len(parts) == 2:
             s_month, s_year = int(parts[0]), int(parts[1])
-            return (REF_YEAR - s_year) * 12 + (REF_MONTH - s_month)
+            ref_year, ref_month = _india_ref_date()
+            return (ref_year - s_year) * 12 + (ref_month - s_month)
     except (ValueError, TypeError):
         pass
     return None
 
 
-def compute_india_risk(project: dict, reports: Optional[list] = None) -> dict:
+def compute_india_risk(project: dict, reports: Optional[list] = None, settings: Optional[dict] = None) -> dict:
     """Compute risk flags and reasons for an Indian infrastructure project."""
     if reports is None:
         reports = load_reports()
@@ -601,7 +662,7 @@ def compute_india_risk(project: dict, reports: Optional[list] = None) -> dict:
             pass
 
     # 3b. Money spent is far ahead of physical progress
-    spend = spend_analysis(project)
+    spend = spend_analysis(project, settings)
     if spend["spend_alert"]:
         label = "Critical spend gap" if spend["spend_alert"] == "critical" else "Spend ahead of progress"
         risk_reasons.append(
@@ -641,91 +702,131 @@ def compute_india_risk(project: dict, reports: Optional[list] = None) -> dict:
 
 # ── India Projects Endpoints ───────────────────────────────────────────
 
-@app.get("/india/projects")
-def list_india_projects(
-    status: Optional[str] = Query(None, description="Filter by exact status match"),
-    search: Optional[str] = Query(None, description="Case-insensitive substring match on project name, sector, ministry, state, or ID"),
-):
-    """Return list of India infrastructure projects with optional status and search filters."""
-    global india_projects_df
-    load_india_projects()
+_LISTING_COLS = [
+    "project_id",
+    "name",
+    "sector",
+    "ministry",
+    "state",
+    "original_cost_cr",
+    "revised_cost_cr",
+    "expenditure_cr",
+    "status",
+    "physical_progress_pct",
+    "delay_note",
+    "approval_date",
+    "start_date",
+    "target_doc",
+    "original_doc",
+    "revised_doc",
+    "actual_completion",
+    "assigned_officer",
+    "assigned_contractor",
+]
+# Dropped from the payload (rather than sent as null) when a project has no value.
+_OMIT_IF_MISSING = {
+    "physical_progress_pct",
+    "delay_note",
+    "approval_date",
+    "start_date",
+    "target_doc",
+    "original_doc",
+    "revised_doc",
+    "actual_completion",
+}
+_SEARCH_COLS = ("name", "sector", "ministry", "state", "project_id")
 
-    if india_projects_df.empty:
-        return []
 
-    df = india_projects_df.copy()
+def _is_missing(v) -> bool:
+    return v is None or (isinstance(v, float) and math.isnan(v))
 
-    # Filter by exact status match
-    if status:
-        if "status" in df.columns:
-            df = df[df["status"] == status]
 
-    # Filter by case-insensitive substring match on project name, sector, ministry, state, or ID
-    if search:
-        s = str(search).strip()
-        mask = pd.Series(False, index=df.index)
-        for col in ["name", "sector", "ministry", "state", "project_id"]:
-            if col in df.columns:
-                mask |= df[col].astype(str).str.contains(s, case=False, na=False)
-        df = df[mask]
-
-    target_cols = [
-        "project_id",
-        "name",
-        "sector",
-        "ministry",
-        "state",
-        "original_cost_cr",
-        "revised_cost_cr",
-        "expenditure_cr",
-        "status",
-        "physical_progress_pct",
-        "delay_note",
-        "approval_date",
-        "start_date",
-        "target_doc",
-        "original_doc",
-        "revised_doc",
-        "actual_completion",
-        "assigned_officer",
-        "assigned_contractor",
-    ]
-    cols = [c for c in target_cols if c in df.columns]
-
-    records = df[cols].to_dict(orient="records")
-    results = []
+def _build_india_listing() -> list:
+    projects = _projects_snapshot()
     reports = load_reports()
-    for r in records:
+    settings = get_settings()
+
+    reports_by_pid: dict = {}
+    for r in reports:
+        reports_by_pid.setdefault(str(r.get("project_id")), []).append(r)
+
+    present_cols = {k for p in projects for k in p.keys()} | {"project_id", "assigned_officer", "assigned_contractor"}
+    cols = [c for c in _LISTING_COLS if c in present_cols]
+
+    results = []
+    for idx, p in enumerate(projects):
+        pid = p.get("project_id")
+        if _is_missing(pid):
+            pid = p.get("id", idx)
+
         cleaned = {}
-        for k, v in r.items():
-            if pd.isna(v):
-                if k in (
-                    "physical_progress_pct",
-                    "delay_note",
-                    "approval_date",
-                    "start_date",
-                    "target_doc",
-                    "original_doc",
-                    "revised_doc",
-                    "actual_completion",
-                ):
+        for k in cols:
+            v = pid if k == "project_id" else p.get(k)
+            if _is_missing(v):
+                if k in _OMIT_IF_MISSING:
                     continue
                 cleaned[k] = None
             else:
                 cleaned[k] = v
 
-        cleaned.setdefault("assigned_officer", None)
-        cleaned.setdefault("assigned_contractor", None)
-
-        risk_info = compute_india_risk(cleaned, reports=reports)
+        # Contractor-raised delays live outside the listing columns but must still count as a risk.
+        risk_input = {
+            **cleaned,
+            "is_delayed_by_contractor": p.get("is_delayed_by_contractor"),
+            "contractor_delay_reason": p.get("contractor_delay_reason"),
+        }
+        risk_info = compute_india_risk(risk_input, reports=reports_by_pid.get(str(pid), []), settings=settings)
         cleaned["is_flagged"] = risk_info["is_flagged"]
         cleaned["risk_reasons"] = risk_info["risk_reasons"]
-        cleaned.update(spend_analysis(cleaned))
-
+        cleaned.update(spend_analysis(cleaned, settings))
         results.append(cleaned)
-
     return results
 
+
+def _india_listing() -> list:
+    """Enriched project list, rebuilt only when projects, reports or settings change.
+    Shared cache: treat as read-only (copy items before mutating)."""
+    return _memo("india_listing", _data_version(), _build_india_listing)
+
+
+def _india_alerts() -> list:
+    def build():
+        flagged = [p for p in _india_listing() if p.get("is_flagged")]
+        flagged.sort(key=lambda p: len(p.get("risk_reasons", [])), reverse=True)
+        return flagged
+    return _memo("india_alerts", _data_version(), build)
+
+
+@app.get("/india/projects")
+def list_india_projects(
+    status: Optional[str] = Query(None, description="Filter by exact status match"),
+    search: Optional[str] = Query(None, description="Case-insensitive substring match on project name, sector, ministry, state, or ID"),
+    limit: Optional[int] = Query(None, ge=1, le=500, description="Page size. Omit to get every project (backwards compatible)."),
+    offset: int = Query(0, ge=0, description="Number of projects to skip when paginating"),
+):
+    """Return list of India infrastructure projects with optional status/search filters and pagination.
+    The X-Total-Count header always carries the number of matches before pagination."""
+    if not status and not search and limit is None and offset == 0:
+        resp = _cached_json("india_projects", _data_version(), _india_listing)
+        resp.headers["X-Total-Count"] = str(len(_india_listing()))
+        return resp
+
+    items = _india_listing()
+    if status:
+        items = [p for p in items if p.get("status") == status]
+    if search:
+        needle = str(search).strip().lower()
+        items = [
+            p for p in items
+            if any(needle in str(p.get(col, "")).lower() for col in _SEARCH_COLS if p.get(col) is not None)
+        ]
+    total = len(items)
+    items = items[offset: offset + limit] if limit is not None else items[offset:]
+    return Response(
+        content=json.dumps(items, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8"),
+        media_type="application/json",
+        headers={"X-Total-Count": str(total)},
+    )
 
 
 @app.get("/india/alerts")
@@ -734,10 +835,7 @@ def get_india_alerts():
     Return only flagged India infrastructure projects (is_flagged == true) from the full list,
     sorted by number of reasons descending (most flags first).
     """
-    all_projects = list_india_projects(status=None, search=None)
-    flagged = [p for p in all_projects if p.get("is_flagged")]
-    flagged.sort(key=lambda p: len(p.get("risk_reasons", [])), reverse=True)
-    return flagged
+    return _cached_json("india_alerts", _data_version(), _india_alerts)
 
 
 # ── India Projects — Admin Write Endpoints ─────────────────────────────
@@ -811,6 +909,54 @@ def _save_projects_file(data: dict):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+# ── Read caches ────────────────────────────────────────────────────────
+# Every cache entry is keyed on the (mtime, size) of the files it was built from, so any
+# write through the existing save_* helpers invalidates it automatically.
+
+_cache_lock = threading.RLock()
+_memo_store: dict = {}
+
+
+def _memo(name: str, version, build):
+    with _cache_lock:
+        hit = _memo_store.get(name)
+        if hit is not None and hit[0] == version:
+            return hit[1]
+    value = build()
+    with _cache_lock:
+        _memo_store[name] = (version, value)
+    return value
+
+
+def _data_version():
+    return (
+        file_version(_get_projects_file_path()),
+        file_version(_get_reports_file_path()),
+        settings_version(),
+        _india_ref_date(),  # project ages change when the month rolls over
+    )
+
+
+def _projects_snapshot() -> list:
+    """Cached, read-only view of real_projects.json for GET handlers.
+    Never mutate the result; write paths must use _load_projects_file()."""
+    return _memo(
+        "projects_raw",
+        file_version(_get_projects_file_path()),
+        lambda: _load_projects_file().get("projects", []),
+    )
+
+
+def _cached_json(name: str, version, build) -> Response:
+    """Serialize a large payload once per data version instead of on every request."""
+    body = _memo(
+        f"json:{name}",
+        version,
+        lambda: json.dumps(build(), ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8"),
+    )
+    return Response(content=body, media_type="application/json")
 
 
 def _generate_project_id(existing_projects: list) -> str:
@@ -1116,8 +1262,7 @@ def get_my_assigned_projects(
     Fetch the project(s) assigned to the current user (field officer or contractor).
     Returns a list of project objects.
     """
-    raw = _load_projects_file()
-    projects_list = raw.get("projects", [])
+    projects_list = _projects_snapshot()
     username = current_user.get("username")
     user_id = str(current_user.get("id") or current_user.get("user_id") or "")
     role = current_user.get("role")
@@ -1156,8 +1301,7 @@ def get_available_officers(
     Return field officers who are NOT currently assigned to another active project.
     If project_id is provided, the officer currently assigned to that project is also included.
     """
-    raw = _load_projects_file()
-    projects = raw.get("projects", [])
+    projects = _projects_snapshot()
 
     busy_officers = set()
     for p in projects:
@@ -1191,8 +1335,7 @@ def get_available_contractors(
     Return verified contractors who are NOT currently assigned to another active project.
     If project_id is provided, the contractor currently assigned to that project is also included.
     """
-    raw = _load_projects_file()
-    projects = raw.get("projects", [])
+    projects = _projects_snapshot()
 
     busy_contractors = set()
     for p in projects:
@@ -1723,19 +1866,15 @@ def save_followers(followers_dict: dict):
 
 
 def _get_india_project_name_map() -> dict:
-    global india_projects_df
-    if india_projects_df.empty:
-        load_india_projects()
-    if india_projects_df.empty or "project_id" not in india_projects_df.columns:
-        return {}
-    name_col = "name" if "name" in india_projects_df.columns else None
-    if not name_col:
-        return {}
-    return {
-        str(row["project_id"]): str(row[name_col])
-        for _, row in india_projects_df[["project_id", name_col]].iterrows()
-        if pd.notna(row["project_id"]) and pd.notna(row[name_col])
-    }
+    def build():
+        names = {}
+        for p in _projects_snapshot():
+            pid = p.get("project_id", p.get("id"))
+            name = p.get("name")
+            if not _is_missing(pid) and not _is_missing(name):
+                names[str(pid)] = str(name)
+        return names
+    return _memo("name_map", file_version(_get_projects_file_path()), build)
 
 
 @app.post("/india/projects/{project_id}/follow")
@@ -1810,7 +1949,7 @@ def get_india_notifications(
 
     # 1. Admin retains nationwide overview of all flagged projects
     if role == "admin":
-        alert_items = get_india_alerts()
+        alert_items = [dict(a) for a in _india_alerts()]
         for a in alert_items:
             if not a.get("summary") and a.get("risk_reasons"):
                 a["summary"] = "Flagged: " + ", ".join(a["risk_reasons"][:2])
@@ -1821,8 +1960,7 @@ def get_india_notifications(
             "items": alert_items,
         }
 
-    raw = _load_projects_file()
-    projects_list = raw.get("projects", [])
+    projects_list = _projects_snapshot()
     all_reports = load_reports()
     name_map = _get_india_project_name_map()
 
@@ -1851,6 +1989,7 @@ def get_india_notifications(
         ]
 
         items = []
+        notices = load_notices() if role == "contractor" else []
 
         for p in assigned_project_records:
             pid = str(p.get("project_id"))
@@ -1938,7 +2077,7 @@ def get_india_notifications(
 
             # Priority 2c: formal notices issued by administration
             if role == "contractor":
-                for n in load_notices():
+                for n in notices:
                     if str(n.get("project_id")) == pid and not n.get("resolved"):
                         items.append({
                             "project_id": pid,
@@ -2001,14 +2140,13 @@ def get_india_notifications(
     }
 
     # Followed projects risk status (persistent risk flags at top)
-    all_projects = list_india_projects(status=None, search=None)
+    all_projects = _india_listing()
     risk_flag_items = []
     for p in all_projects:
         pid = str(p.get("project_id"))
         if pid in followed_pids:
-            risk_info = compute_india_risk(p, reports=all_reports)
-            if risk_info.get("is_flagged"):
-                risk_reasons = risk_info.get("risk_reasons", [])
+            if p.get("is_flagged"):
+                risk_reasons = p.get("risk_reasons", [])
                 p_name = p.get("name") or name_map.get(pid, f"Project #{pid}")
                 risk_flag_items.append({
                     "project_id": pid,
@@ -2162,14 +2300,15 @@ def _synthesize_india_response(question: str, all_projects: list, flagged: list,
     )
 
 
-@app.post("/india/assistant/ask")
+# Public (guests can use it), so it is rate limited per IP to protect the Gemini quota.
+@app.post("/india/assistant/ask", dependencies=[Depends(rate_limit("india_assistant", limit=15, window_s=60))])
 def india_assistant_ask(
     request: AskRequest,
 ):
     """Answer user questions about real Indian infrastructure projects using fast targeted RAG with instant intelligence fallback."""
     try:
-        all_projects = list_india_projects(status=None, search=None)
-        flagged = [p for p in all_projects if p.get("is_flagged")]
+        all_projects = _india_listing()
+        flagged = _india_alerts()
 
         q_lower = request.question.lower().strip()
         words = [w for w in q_lower.split() if len(w) > 2 and w not in ('the', 'and', 'for', 'with', 'from', 'what', 'which', 'about', 'how', 'many', 'project', 'projects')]
@@ -2200,6 +2339,7 @@ def india_assistant_ask(
         top_matches = scored[:5]
 
         # If gemini client is available, attempt fast generate with concise targeted context
+        gemini_client = get_gemini_client()
         if gemini_client:
             match_lines = []
             for score, p in top_matches:
@@ -2269,7 +2409,7 @@ class RegisterRequest(BaseModel):
     organization: Optional[str] = None
 
 
-@app.post("/auth/login")
+@app.post("/auth/login", dependencies=[Depends(rate_limit("login", limit=10, window_s=300))])
 def login(form_data: OAuth2PasswordRequestForm = Depends()):
     """Authenticate with username and password, return JWT bearer token."""
     user = authenticate_user(form_data.username, form_data.password)
@@ -2312,7 +2452,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends()):
     }
 
 
-@app.post("/auth/register")
+@app.post("/auth/register", dependencies=[Depends(rate_limit("register", limit=5, window_s=3600))])
 def register(request: RegisterRequest):
     """
     Self-registration endpoint.
