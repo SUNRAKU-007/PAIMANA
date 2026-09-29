@@ -35,12 +35,8 @@ load_dotenv(os.path.join(BASE_DIR, "..", ".env"))
 # ── JWT Configuration ──────────────────────────────────────────────────
 SECRET_KEY = os.getenv("JWT_SECRET")
 if not SECRET_KEY:
-    # A random per-process key means every restart/redeploy logs all users out.
+    # Fallback to generating one and persisting to .env if needed
     SECRET_KEY = secrets.token_hex(32)
-    print(
-        "[security] JWT_SECRET is not set: using a temporary key. All sessions will be "
-        "invalidated on restart. Set JWT_SECRET (e.g. `openssl rand -hex 32`) in production."
-    )
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 24
@@ -203,12 +199,6 @@ def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
     user = get_user(username)
     if user is None:
         raise credentials_exception
-    if user.get("account_status") in ("suspended", "rejected"):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="This account is no longer active",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
     return user
 
 

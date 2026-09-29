@@ -119,8 +119,6 @@ export default function Login({ onLoginSuccess, onCancel }) {
   const [regFullName, setRegFullName] = useState('');
   const [regRole, setRegRole] = useState('public'); // 'public' | 'contractor'
   const [regPendingNotice, setRegPendingNotice] = useState(false);
-  const [regVerificationId, setRegVerificationId] = useState('');
-  const [regOrganization, setRegOrganization] = useState('');
 
   async function handleRegister(e) {
     e.preventDefault();
@@ -134,12 +132,9 @@ export default function Login({ onLoginSuccess, onCancel }) {
         password: regPassword,
         full_name: regFullName.trim(),
         role: regRole,
-        ...(regRole !== 'public'
-          ? { verification_id: regVerificationId.trim().toUpperCase(), organization: regOrganization.trim() }
-          : {}),
       });
 
-      if (regRole !== 'public') {
+      if (regRole === 'contractor') {
         // Show pending notice for contractor
         setRegPendingNotice(true);
       } else {
@@ -519,7 +514,7 @@ export default function Login({ onLoginSuccess, onCancel }) {
             </>
           )}
 
-          {/* ── REGISTER MODE ────────────────���─────────────────────────────── */}
+          {/* ── REGISTER MODE ──────────────────────────────────────────────── */}
           {mode === 'register' && (
             <>
               <h2
@@ -648,39 +643,6 @@ export default function Login({ onLoginSuccess, onCancel }) {
                     />
                   </div>
 
-                  {regRole !== 'public' && (
-                    <>
-                      <div>
-                        <label htmlFor="reg-vid" className="block text-sm font-medium mb-1.5" style={{ color: '#16213E' }}>
-                          Verification ID
-                        </label>
-                        <input
-                          id="reg-vid"
-                          type="text"
-                          required
-                          value={regVerificationId}
-                          onChange={(e) => setRegVerificationId(e.target.value)}
-                          placeholder="PMN-CON-XXXXXX"
-                          className="w-full px-4 py-3 rounded-md border border-slate-300 bg-white text-slate-900 text-sm font-mono uppercase placeholder:normal-case placeholder:text-slate-400 focus:outline-none focus:border-[#E8871E] focus:ring-1 focus:ring-[#E8871E]"
-                        />
-                        <p className="mt-1 text-xs text-slate-500">Issued to you by a PAIMANA administrator. Enter your name exactly as it was registered.</p>
-                      </div>
-                      <div>
-                        <label htmlFor="reg-org" className="block text-sm font-medium mb-1.5" style={{ color: '#16213E' }}>
-                          Organisation / Department
-                        </label>
-                        <input
-                          id="reg-org"
-                          type="text"
-                          required
-                          value={regOrganization}
-                          onChange={(e) => setRegOrganization(e.target.value)}
-                          className="w-full px-4 py-3 rounded-md border border-slate-300 bg-white text-slate-900 text-sm focus:outline-none focus:border-[#E8871E] focus:ring-1 focus:ring-[#E8871E]"
-                        />
-                      </div>
-                    </>
-                  )}
-
                   <div>
                     <label
                       htmlFor="reg-username"
@@ -729,7 +691,7 @@ export default function Login({ onLoginSuccess, onCancel }) {
                                disabled:opacity-60 disabled:cursor-not-allowed mt-2"
                     style={{ fontFamily: "'IBM Plex Sans', sans-serif" }}
                   >
-                    {isLoading ? 'Creating account...' : regRole !== 'public' ? 'Submit Registration for Approval' : 'Create Account'}
+                    {isLoading ? 'Creating account...' : regRole === 'contractor' ? 'Submit Contractor Registration' : 'Create Account'}
                   </button>
 
                   {/* Switch back to login */}
