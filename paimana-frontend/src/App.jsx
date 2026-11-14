@@ -147,7 +147,7 @@ function App() {
         }
       })
       .finally(() => setLoading(false))
-  }, [authToken])
+  }, [authToken, isVerified, userRole, assignedProjectId]
 
   function handleRowClick(id) {
     setSelectedProjectId(id)
